@@ -4,12 +4,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-This is a **pre-build** repo. There is no application code, package.json, or git yet — only:
+The Next.js scaffold and **M0 (auth foundations)** are in place: signup gate (`/signup`) with women attestation + versioned consent → `profiles` write + phone OTP, OTP verify (`/verify`), login (`/login`), and a protected post-auth landing (`/skills`, still an M2 stub). M1 (AI generation + calibration) and M2+ (play/scoring) are not built yet — see the build plan (handoff §16).
+
+Reference docs:
 
 - `PROVE_YOUR_WORTH_CLAUDE_CODE_HANDOFF.md` — the **authoritative spec** (v1.0, locked). Source of truth for *what* and *why*. Read the relevant section before writing code in any area.
-- `prove-your-worth.jsx` — a single-file React **reference prototype**. Source of truth for *interaction, screen flow, copy, brand, and motion* — but it contains demo shortcuts that **must not ship** (see below).
+- `prove-your-worth.jsx` — a single-file React **reference prototype**. Source of truth for *interaction, screen flow, copy, brand, and motion* — but it contains demo shortcuts that **must not ship** (see below). It is excluded from tsconfig; treat it as reference, not compiled code.
 
 When the spec marks a decision as open (handoff §19), surface it — do not guess.
+
+## Commands
+
+`npm run dev` (local) · `npm run build` · `npm run typecheck` (tsc --noEmit) · `npm run lint`. Copy `.env.example` → `.env.local` and fill in before running. DB migrations live in `supabase/migrations`.
+
+## Supabase project setup (required for the auth flow to run)
+
+The M0 signup flow depends on project-level Supabase config that is NOT in code:
+
+- **Email confirmation OFF.** Phone OTP is the verification step, not email. `signup` writes the `profiles` row immediately after `signUp`, which needs the session that `signUp` only returns when email confirmation is disabled. (Auth → Providers → Email → "Confirm email" off.)
+- **SMS provider configured** (Twilio or MessageBird) for phone OTP. Without it, `updateUser({ phone })` / `verifyOtp` won't send/verify codes. The phone OTP uses the `phone_change` flow on an already-created account.
+- Run `supabase/migrations/0001_init.sql` against the project (creates tables + RLS).
+
+The auth flow cannot be exercised end-to-end locally until a real Supabase project is wired into `.env.local`.
+
+## Layout
+
+- `app/` — App Router pages: `page.tsx` (hook), `signup/`, `verify/`, `login/`, `skills/` — each with co-located `actions.ts` server actions for auth. `globals.css` holds the TTS token CSS vars + font imports + reduced-motion rule.
+- `components/ui.tsx` — shared TTS-brand primitives (AppShell, Field, Button, Card, Eyebrow…). Reuse these rather than re-inlining prototype styles.
+- `lib/account.ts` — `CONSENT_VERSION` (bump on consent copy change) + `normalizePhoneNG` (→ E.164).
+- `lib/supabase/` — `client.ts` (browser, anon), `server.ts` (RLS-scoped, Server Components/Actions/Route Handlers), `admin.ts` (service role, `server-only`, the *only* path to `correct_index`/grading), `middleware.ts` (session refresh).
+- `lib/anthropic.ts` — `server-only` Anthropic client for the admin generation flow; model id in `GENERATION_MODEL`.
+- `middleware.ts` — root middleware wiring Supabase session refresh.
+- `tailwind.config.ts` — TTS color/font/radius tokens.
 
 ## What's being built
 
