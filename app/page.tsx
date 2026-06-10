@@ -2,8 +2,15 @@ import Link from "next/link";
 import { Sparkles, ArrowRight } from "lucide-react";
 
 // Hook screen — ports the prototype's "hook" screen (prove-your-worth.jsx).
-// Static server component; "Start" routes into the (future) signup gate.
-export default function Home() {
+// Carries a referral code (?ref) through to signup for raffle bonus entries.
+export default function Home({
+  searchParams,
+}: {
+  searchParams: { ref?: string };
+}) {
+  const signupHref = searchParams.ref
+    ? `/signup?ref=${encodeURIComponent(searchParams.ref)}`
+    : "/signup";
   return (
     <main className="flex min-h-screen justify-center">
       <div className="relative w-full max-w-app overflow-hidden bg-white shadow-[0_0_0_1px_rgba(0,73,49,0.06)]">
@@ -45,7 +52,7 @@ export default function Home() {
           </div>
 
           <Link
-            href="/signup"
+            href={signupHref}
             className="btn-primary mt-auto flex w-full items-center justify-center gap-2 rounded-btn bg-green px-[18px] py-[15px] text-[15px] font-semibold text-white transition active:translate-y-px"
           >
             Start &mdash; prove your worth <ArrowRight size={17} />

@@ -25,6 +25,9 @@ export async function signup(
   const phoneRaw = String(formData.get("phone") ?? "");
   const attested = formData.get("attested") === "on";
   const consent = formData.get("consent") === "on";
+  const refRaw = String(formData.get("ref") ?? "").trim();
+  // Only accept a well-formed UUID as a referrer (§9).
+  const referredBy = /^[0-9a-f-]{36}$/i.test(refRaw) ? refRaw : null;
 
   // Server-side validation (never trust the client).
   if (!first || !email) return { error: "Please add your name and email." };
@@ -60,6 +63,7 @@ export async function signup(
     is_woman_attested: attested,
     consent_at: new Date().toISOString(),
     consent_version: CONSENT_VERSION,
+    referred_by: referredBy,
   });
   if (profileError) return { error: profileError.message };
 

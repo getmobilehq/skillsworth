@@ -14,6 +14,8 @@ import {
   RotateCcw,
   GraduationCap,
   Trophy,
+  Share2,
+  Gift,
 } from "lucide-react";
 import { AppShell, Eyebrow, Card, Button, Tagline } from "@/components/ui";
 import { doorFor } from "@/lib/play";
@@ -94,6 +96,7 @@ export default function PlayClient({
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState<Accepted | null>(null);
   const [joined, setJoined] = useState(false);
+  const [shared, setShared] = useState(false);
   const [disputeNote, setDisputeNote] = useState("");
 
   const answersRef = useRef<number[]>([]);
@@ -247,6 +250,21 @@ export default function PlayClient({
       setJoined(true);
       fireConfetti(2000);
     } else setError(res.error);
+  };
+
+  const onShare = async () => {
+    if (!attemptId) return;
+    const url = `${window.location.origin}/card/${attemptId}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Prove Your Worth — TTS Nigeria", url });
+      } else {
+        await navigator.clipboard.writeText(url);
+        setShared(true);
+      }
+    } catch {
+      // user cancelled the share sheet — no-op
+    }
   };
 
   const mm = `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, "0")}`;
@@ -710,19 +728,38 @@ export default function PlayClient({
               <div className="flex items-center gap-2">
                 <Trophy size={16} className="text-deep" />
                 <span className="text-[14px] font-bold text-deep">
-                  You’re Tier A — match-ready 🎉
+                  You’re in Friday’s raffle 🎉
                 </span>
               </div>
               <p className="mt-[6px] text-[12.5px] text-muted">
-                We’ve routed you to QTP for matching. Friday’s raffle auto-entry
-                (Level 3+) arrives in <b>M4</b>.
+                Level 3+ auto-qualifies — your entry is in this week’s pool, and
+                we’ve routed you to QTP for matching.
               </p>
             </Card>
           ) : (
             <div className="mt-3">{communityCTA}</div>
           )}
 
-          <div className="mt-5">{proveAnother}</div>
+          <div className="mt-5 flex flex-col gap-3">
+            <Button variant="dark" onClick={onShare}>
+              <Share2 size={16} /> {shared ? "Link copied!" : "Share my score card"}
+            </Button>
+            <div className="flex gap-3">
+              <Link
+                href="/leaderboard"
+                className="flex flex-1 items-center justify-center gap-2 rounded-btn border-[1.5px] border-green bg-white px-[14px] py-[13px] text-[14px] font-semibold text-deep"
+              >
+                <Trophy size={15} /> Leaderboard
+              </Link>
+              <Link
+                href="/raffle"
+                className="flex flex-1 items-center justify-center gap-2 rounded-btn border-[1.5px] border-green bg-white px-[14px] py-[13px] text-[14px] font-semibold text-deep"
+              >
+                <Gift size={15} /> Raffle
+              </Link>
+            </div>
+            {proveAnother}
+          </div>
           <Tagline />
         </div>
       )}

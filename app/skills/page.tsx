@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Trophy, Gift } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/login/actions";
 import { AppShell, Eyebrow, Card, Button, Tagline } from "@/components/ui";
@@ -66,7 +66,21 @@ export default async function SkillsPage() {
         )}
       </div>
 
-      <form action={signOut} className="mt-auto pt-6">
+      <div className="mt-auto flex gap-3 pt-6">
+        <Link
+          href="/leaderboard"
+          className="flex flex-1 items-center justify-center gap-2 rounded-btn border-[1.5px] border-green bg-white px-[14px] py-[13px] text-[14px] font-semibold text-deep"
+        >
+          <Trophy size={15} /> Leaderboard
+        </Link>
+        <Link
+          href="/raffle"
+          className="flex flex-1 items-center justify-center gap-2 rounded-btn border-[1.5px] border-green bg-white px-[14px] py-[13px] text-[14px] font-semibold text-deep"
+        >
+          <Gift size={15} /> Raffle
+        </Link>
+      </div>
+      <form action={signOut} className="mt-3">
         <Button type="submit" variant="ghost">
           Sign out
         </Button>

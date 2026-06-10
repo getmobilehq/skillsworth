@@ -13,7 +13,11 @@ The Next.js scaffold, **M0 (auth foundations)**, and **M1 (generation + calibrat
 
 - **M3:** funnel. From the reveal, accept (records a `routings` row; Tier A flagged for CRM/ERP sync via `synced_to_crm=false`) or dispute. Dispute = re-prove live (`beginReprove` re-opens the attempt at level reached+1; clearing it upgrades the band) or human review (`disputes` row). L1/L2 reveal shows the community CTA → `community_joins`. Admin dispute desk at `/admin/disputes` (assign + resolve). Funnel actions in `app/play/funnel-actions.ts`.
 
-M4 (leaderboard + raffle) and M5 (comms/analytics/hardening) are not built yet — see the build plan (handoff §16). Known stubs: CRM/ERP sync leaves `synced_to_crm=false` (no worker yet); community join doesn't send the Resend welcome / workshop enrollment yet (M5).
+- **M4:** leaderboard + raffle. On accept, `acceptResult` posts a display-safe `leaderboard_entries` row (no PII beyond first name + last initial) and, for Tier A, enters the weekly raffle via `lib/raffu.ts` + mirrors `raffle_entries`. `/leaderboard` is per-category and **realtime** (browser subscribes to `leaderboard_entries` changes). `/raffle` shows the pot + winners spotlight; admin draw at `/admin/raffle` picks top scorer + one random from the qualified pool into `raffle_winners`. Shareable score card at `/card/[attemptId]` (public, service-role read) with a `?ref=` referral that grants the referrer a bonus entry on a referred user's first Tier-A accept.
+
+M5 (comms/analytics/hardening) is not built yet — see the build plan (handoff §16). Known stubs: CRM/ERP sync leaves `synced_to_crm=false` (no worker yet); community join doesn't send the Resend welcome / workshop enrollment yet (M5).
+
+**raffu coupling (§19 open decision):** `lib/raffu.ts` abstracts it behind `enterRaffle()`. Current default = HTTP API call when `RAFFU_BASE_URL`/`RAFFU_SERVICE_KEY` are set, else a safe no-op (entry still mirrored locally). Switch to shared-Supabase direct inserts there if that's the chosen path. The leaderboard requires Realtime enabled on `leaderboard_entries` (the 0003 migration adds it to the `supabase_realtime` publication).
 
 Reference docs:
 
@@ -47,7 +51,11 @@ The auth flow cannot be exercised end-to-end locally until a real Supabase proje
 - `app/play/actions.ts` — server-authoritative serve/grade. `beginAttempt` / `serveLevel` / `submitLevel`. Scored serving stores `served_question_ids` + `served_at` in `attempt_levels` (written via service role — no client write policy by design); grading reads `correct_index` only here. `correct_index` reaches the client **only** post-submit, per question.
 - `lib/play.ts` — pure helpers: `isoWeek`, `tierFor`, `destinationFor`, `doorFor`, `scoreFromLevels`, `shuffle`, thresholds.
 - `lib/current-user.ts` — `currentVerifiedUser()` shared by play + funnel actions.
-- `app/play/funnel-actions.ts` — accept/dispute/join/reprove (service-role writes after ownership check).
+- `app/play/funnel-actions.ts` — accept/dispute/join/reprove (service-role writes after ownership check); accept also posts the leaderboard entry + raffle entry.
+- `lib/raffu.ts` — `server-only` raffu abstraction (`enterRaffle`, `raffleSlugFor`).
+- `app/leaderboard/` — realtime per-category board (browser Supabase subscription).
+- `app/raffle/`, `app/admin/raffle/` — player raffle view + admin draw.
+- `app/card/[attemptId]/` — public shareable score card.
 - `lib/supabase/` — `client.ts` (browser, anon), `server.ts` (RLS-scoped, Server Components/Actions/Route Handlers), `admin.ts` (service role, `server-only`, the *only* path to `correct_index`/grading), `middleware.ts` (session refresh).
 - `lib/anthropic.ts` — `server-only` Anthropic client for the admin generation flow; model id in `GENERATION_MODEL`.
 - `middleware.ts` — root middleware wiring Supabase session refresh.

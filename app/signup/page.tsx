@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { Check, Phone } from "lucide-react";
 import {
@@ -17,6 +18,12 @@ import { signup, type SignupState } from "./actions";
 // women attestation + versioned consent are required.
 export default function SignupPage() {
   const [state, formAction] = useFormState<SignupState, FormData>(signup, {});
+  // Referral code from the share-card link (?ref=<userId>), read client-side to
+  // avoid a Suspense boundary; validated server-side.
+  const [ref, setRef] = useState("");
+  useEffect(() => {
+    setRef(new URLSearchParams(window.location.search).get("ref") ?? "");
+  }, []);
 
   return (
     <AppShell>
@@ -30,6 +37,7 @@ export default function SignupPage() {
       </p>
 
       <form action={formAction} className="mt-5 flex flex-col gap-[14px]">
+        <input type="hidden" name="ref" value={ref} />
         <div className="flex gap-[10px]">
           <div className="flex-1">
             <Label htmlFor="first">First name</Label>

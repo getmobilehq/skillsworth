@@ -3,17 +3,30 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { currentVerifiedUser } from "@/lib/current-user";
 import { tierFor, destinationFor } from "@/lib/play";
+import { enterRaffle } from "@/lib/raffu";
 
-// Accept / dispute / route — the funnel (handoff §5, §10, §12).
+// Accept / dispute / route — the funnel (handoff §5, §10, §11, §12).
 
 export type AcceptResult =
-  | { ok: true; tier: "A" | "B" | "C"; destination: string; reachedLevel: number }
+  | {
+      ok: true;
+      tier: "A" | "B" | "C";
+      destination: string;
+      reachedLevel: number;
+      qualified: boolean;
+    }
   | { ok: false; error: string };
 
+function displayName(first?: string | null, last?: string | null): string {
+  const initial = last?.trim() ? ` ${last.trim()[0]}.` : "";
+  return `${first?.trim() || "Anonymous"}${initial}`;
+}
+
 /**
- * Accept the result: record the routing for the attempt's tier. Tier A is
- * flagged for CRM/ERP sync (synced_to_crm stays false until a sync worker
- * picks it up — see §10). Idempotent per attempt.
+ * Accept the result: record routing, post to the leaderboard, and (Tier A)
+ * enter the weekly raffle. Tier A routing is flagged for CRM/ERP sync
+ * (synced_to_crm stays false until a worker picks it up — §10). The raffle +
+ * referral side-effects run once, on first accept.
  */
 export async function acceptResult(attemptId: string): Promise<AcceptResult> {
   const user = await currentVerifiedUser();
@@ -22,7 +35,7 @@ export async function acceptResult(attemptId: string): Promise<AcceptResult> {
   const db = createAdminClient();
   const { data: attempt } = await db
     .from("attempts")
-    .select("user_id, status, reached_level, tier")
+    .select("user_id, status, reached_level, tier, band_label, score, skill_id, week_iso")
     .eq("id", attemptId)
     .single();
   if (!attempt || attempt.user_id !== user.id)
@@ -30,14 +43,46 @@ export async function acceptResult(attemptId: string): Promise<AcceptResult> {
   if (attempt.status !== "complete")
     return { ok: false, error: "Finish your run before accepting." };
 
-  const tier = (attempt.tier as "A" | "B" | "C" | null) ?? tierFor(attempt.reached_level);
+  const tier =
+    (attempt.tier as "A" | "B" | "C" | null) ?? tierFor(attempt.reached_level);
   const destination = destinationFor(tier);
+  const qualified = attempt.reached_level >= 3;
 
+  const [{ data: skill }, { data: profile }] = await Promise.all([
+    db.from("skills").select("name, category").eq("id", attempt.skill_id).single(),
+    db
+      .from("profiles")
+      .select("first_name, last_name, phone, referred_by")
+      .eq("id", user.id)
+      .single(),
+  ]);
+  const name = displayName(profile?.first_name, profile?.last_name);
+  const slug = `skill-worth-${attempt.week_iso}`;
+
+  // Leaderboard post (idempotent on attempt_id) — display-safe fields only.
+  await db.from("leaderboard_entries").upsert(
+    {
+      attempt_id: attemptId,
+      user_id: user.id,
+      category: skill?.category ?? "Other",
+      skill_name: skill?.name ?? "",
+      display_name: name,
+      score: attempt.score,
+      reached_level: attempt.reached_level,
+      qualified,
+      week_iso: attempt.week_iso,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "attempt_id" },
+  );
+
+  // Routing + one-time raffle/referral side-effects on first accept.
   const { data: existing } = await db
     .from("routings")
     .select("id")
     .eq("attempt_id", attemptId)
     .maybeSingle();
+
   if (!existing) {
     await db.from("routings").insert({
       attempt_id: attemptId,
@@ -45,9 +90,43 @@ export async function acceptResult(attemptId: string): Promise<AcceptResult> {
       destination,
       synced_to_crm: false,
     });
+
+    if (qualified) {
+      const entry = await enterRaffle({
+        name,
+        email: user.email ?? "",
+        phone: profile?.phone ?? null,
+        skill: skill?.name ?? "",
+        band: attempt.band_label,
+        score: attempt.score,
+        slug,
+      });
+      await db.from("raffle_entries").insert({
+        user_id: user.id,
+        attempt_id: attemptId,
+        raffle_slug: slug,
+        raffu_entry_id: entry.raffuEntryId,
+      });
+
+      // Referral → extra entry for the referrer (§9).
+      if (profile?.referred_by) {
+        await db.from("raffle_entries").insert({
+          user_id: profile.referred_by,
+          attempt_id: null,
+          raffle_slug: slug,
+          raffu_entry_id: null,
+        });
+      }
+    }
   }
 
-  return { ok: true, tier, destination, reachedLevel: attempt.reached_level };
+  return {
+    ok: true,
+    tier,
+    destination,
+    reachedLevel: attempt.reached_level,
+    qualified,
+  };
 }
 
 export type SimpleResult = { ok: boolean; error?: string };

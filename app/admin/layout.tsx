@@ -20,6 +20,9 @@ export default function AdminLayout({
             <Link href="/admin/disputes" className="hover:text-deep">
               Disputes
             </Link>
+            <Link href="/admin/raffle" className="hover:text-deep">
+              Raffle
+            </Link>
           </nav>
         </div>
       </header>
