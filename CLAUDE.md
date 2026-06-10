@@ -9,7 +9,9 @@ The Next.js scaffold, **M0 (auth foundations)**, and **M1 (generation + calibrat
 - **M0:** signup gate (`/signup`) with women attestation + versioned consent → `profiles` write + phone OTP, OTP verify (`/verify`), login (`/login`), protected post-auth landing (`/skills`, still an M2 stub).
 - **M1:** admin calibration desk (`/admin`, gated by `profiles.is_admin`). Generates a skill's scaffold + naira bands + a draft question pool via Anthropic (server-side, into `questions` as `draft`); review page (`/admin/skills/[id]`) to approve/retire/edit questions, edit bands, and set the skill `live` (gated on ≥3 approved questions per level).
 
-M2+ (skill pick → server-scored timed play → reveal/route) is not built yet — see the build plan (handoff §16).
+- **M2:** skill pick (`/skills`, live skills only) → timed play (`/play/[skillId]`, scored or `?mode=practice`). Server serves a random approved 3-question subset **without `correct_index`**, enforces the timer server-side (idempotent serve — refresh can't reset the clock or re-roll), grades via service role, computes reached level/score/tier/band, and finalizes the attempt. One scored run per skill per week (unique constraint + completed-attempt guard); practice is unscored and persists nothing. Reveal shows band/tier + climb.
+
+M3 (accept/dispute + tier routing), M4 (leaderboard + raffle), M5 (comms/analytics/hardening) are not built yet — see the build plan (handoff §16).
 
 Reference docs:
 
@@ -40,6 +42,8 @@ The auth flow cannot be exercised end-to-end locally until a real Supabase proje
 - `lib/generation.ts` — `server-only` Anthropic generation (`generateScaffold`, `generateQuestions`) with strict JSON validation; returns draft data only.
 - `lib/admin.ts` — `requireAdmin()` guard; call at the top of every admin page/action before any service-role op.
 - `app/admin/` — calibration desk; all writes go through the service-role client after `requireAdmin`. Admins see `correct_index` (they're calibrating); players never do.
+- `app/play/actions.ts` — server-authoritative serve/grade. `beginAttempt` / `serveLevel` / `submitLevel`. Scored serving stores `served_question_ids` + `served_at` in `attempt_levels` (written via service role — no client write policy by design); grading reads `correct_index` only here. `correct_index` reaches the client **only** post-submit, per question.
+- `lib/play.ts` — pure helpers: `isoWeek`, `tierFor`, `scoreFromLevels`, `shuffle`, thresholds.
 - `lib/supabase/` — `client.ts` (browser, anon), `server.ts` (RLS-scoped, Server Components/Actions/Route Handlers), `admin.ts` (service role, `server-only`, the *only* path to `correct_index`/grading), `middleware.ts` (session refresh).
 - `lib/anthropic.ts` — `server-only` Anthropic client for the admin generation flow; model id in `GENERATION_MODEL`.
 - `middleware.ts` — root middleware wiring Supabase session refresh.

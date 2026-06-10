@@ -37,6 +37,54 @@
   }
 }
 
+/* Play-screen motion — mirrors prove-your-worth.jsx. Disabled by the
+   reduced-motion block below. */
+.conf {
+  position: absolute;
+  top: -14px;
+  width: 9px;
+  height: 15px;
+  border-radius: 2px;
+  opacity: 0.95;
+  z-index: 50;
+  animation: fall linear forwards;
+}
+@keyframes fall {
+  to {
+    transform: translateY(680px) rotate(680deg);
+    opacity: 0;
+  }
+}
+@keyframes pop {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.pop {
+  animation: pop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+@keyframes flash {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.flash {
+  animation: flash 0.4s ease both;
+}
+
 /* Respect reduced motion globally — handoff §3.10 / §14 */
 @media (prefers-reduced-motion: reduce) {
   *,

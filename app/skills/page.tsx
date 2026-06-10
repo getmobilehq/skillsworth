@@ -1,11 +1,11 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Sparkles } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/login/actions";
 import { AppShell, Eyebrow, Card, Button, Tagline } from "@/components/ui";
 
-// Post-auth landing. M0 stub — the real skill pick + AI assessment lands in M2.
-// Guards: must be signed in and phone-verified.
+// Skill pick (handoff §2). Lists LIVE skills (RLS exposes only status='live').
 export default async function SkillsPage() {
   const supabase = createClient();
   const {
@@ -18,8 +18,13 @@ export default async function SkillsPage() {
     .select("first_name, phone_verified")
     .eq("id", user.id)
     .single();
-
   if (!profile?.phone_verified) redirect("/verify");
+
+  const { data: skills } = await supabase
+    .from("skills")
+    .select("id, name, category")
+    .eq("status", "live")
+    .order("name");
 
   return (
     <AppShell minScreen>
@@ -30,25 +35,42 @@ export default async function SkillsPage() {
       <h1 className="mt-2 font-display text-[28px] font-extrabold text-deep">
         Pick a skill.
       </h1>
+      <p className="mt-2 text-[13.5px] leading-[1.45] text-muted">
+        One scored run per skill each week. Practice as much as you like.
+      </p>
 
-      <Card tone="cream" className="mt-5">
-        <p className="text-[13.5px] leading-[1.5] text-ink">
-          You&rsquo;re signed in and verified. The skill picker and live,
-          AI-built assessment land in <b>M2</b> — see the build plan in
-          CLAUDE.md.
-        </p>
-      </Card>
-
-      <div className="mt-auto">
-        <Button variant="primary" disabled className="mb-3">
-          <Sparkles size={16} /> Build my assessment (coming in M2)
-        </Button>
-        <form action={signOut}>
-          <Button type="submit" variant="ghost">
-            Sign out
-          </Button>
-        </form>
+      <div className="mt-5 flex flex-col gap-2">
+        {!skills?.length ? (
+          <Card tone="cream">
+            <p className="text-[13.5px] leading-[1.5] text-ink">
+              No live skills yet. The calibration team is preparing the first
+              ones — check back soon.
+            </p>
+          </Card>
+        ) : (
+          skills.map((s) => (
+            <Link
+              key={s.id}
+              href={`/play/${s.id}`}
+              className="flex items-center justify-between rounded-card border-[1.5px] border-[#DCE6E0] bg-white px-[16px] py-[15px] transition hover:border-green"
+            >
+              <span>
+                <span className="block text-[15px] font-semibold text-deep">
+                  {s.name}
+                </span>
+                <span className="text-[12.5px] text-muted">{s.category}</span>
+              </span>
+              <ChevronRight size={18} className="text-green" />
+            </Link>
+          ))
+        )}
       </div>
+
+      <form action={signOut} className="mt-auto pt-6">
+        <Button type="submit" variant="ghost">
+          Sign out
+        </Button>
+      </form>
       <Tagline />
     </AppShell>
   );
