@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Sparkles, ArrowRight } from "lucide-react";
+import SiteFooter from "@/components/site-footer";
 
 // Hook screen — ports the prototype's "hook" screen (prove-your-worth.jsx).
 // Carries a referral code (?ref) through to signup for raffle bonus entries.
@@ -61,6 +62,7 @@ export default function Home({
           <div className="font-display py-[18px] text-center text-xs font-bold italic text-green">
             Dignified Work for a Digital Future.
           </div>
+          <SiteFooter />
         </div>
       </div>
     </main>

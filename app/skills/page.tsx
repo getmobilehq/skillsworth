@@ -4,6 +4,7 @@ import { ChevronRight, Trophy, Gift } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/login/actions";
 import { AppShell, Eyebrow, Card, Button, Tagline } from "@/components/ui";
+import SiteFooter from "@/components/site-footer";
 
 // Skill pick (handoff §2). Lists LIVE skills (RLS exposes only status='live').
 export default async function SkillsPage() {
@@ -86,6 +87,7 @@ export default async function SkillsPage() {
         </Button>
       </form>
       <Tagline />
+      <SiteFooter />
     </AppShell>
   );
 }

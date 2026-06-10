@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { currentVerifiedUser } from "@/lib/current-user";
 import { tierFor, destinationFor } from "@/lib/play";
 import { enterRaffle } from "@/lib/raffu";
+import { sendEmail, communityWelcomeHtml } from "@/lib/email";
 
 // Accept / dispute / route — the funnel (handoff §5, §10, §11, §12).
 
@@ -185,7 +186,21 @@ export async function joinCommunity(attemptId: string): Promise<SimpleResult> {
     status: "joined",
   });
   if (error) return { ok: false, error: error.message };
-  // TODO(M5): trigger Resend welcome + workshop enrollment.
+
+  // Welcome email (no-op if Resend isn't configured). Workshop enrollment is a
+  // downstream integration owned by the community team.
+  const { data: profile } = await db
+    .from("profiles")
+    .select("first_name")
+    .eq("id", user.id)
+    .single();
+  if (user.email) {
+    await sendEmail({
+      to: user.email,
+      subject: "Welcome to the TTS Community",
+      html: communityWelcomeHtml(profile?.first_name ?? ""),
+    });
+  }
   return { ok: true };
 }
 

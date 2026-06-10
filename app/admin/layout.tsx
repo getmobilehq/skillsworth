@@ -17,11 +17,17 @@ export default function AdminLayout({
             <Link href="/admin" className="hover:text-deep">
               Skills
             </Link>
+            <Link href="/admin/dashboard" className="hover:text-deep">
+              Dashboard
+            </Link>
             <Link href="/admin/disputes" className="hover:text-deep">
               Disputes
             </Link>
             <Link href="/admin/raffle" className="hover:text-deep">
               Raffle
+            </Link>
+            <Link href="/admin/safeguarding" className="hover:text-deep">
+              Safeguarding
             </Link>
           </nav>
         </div>

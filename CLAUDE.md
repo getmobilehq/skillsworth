@@ -15,7 +15,11 @@ The Next.js scaffold, **M0 (auth foundations)**, and **M1 (generation + calibrat
 
 - **M4:** leaderboard + raffle. On accept, `acceptResult` posts a display-safe `leaderboard_entries` row (no PII beyond first name + last initial) and, for Tier A, enters the weekly raffle via `lib/raffu.ts` + mirrors `raffle_entries`. `/leaderboard` is per-category and **realtime** (browser subscribes to `leaderboard_entries` changes). `/raffle` shows the pot + winners spotlight; admin draw at `/admin/raffle` picks top scorer + one random from the qualified pool into `raffle_winners`. Shareable score card at `/card/[attemptId]` (public, service-role read) with a `?ref=` referral that grants the referrer a bonus entry on a referred user's first Tier-A accept.
 
-M5 (comms/analytics/hardening) is not built yet — see the build plan (handoff §16). Known stubs: CRM/ERP sync leaves `synced_to_crm=false` (no worker yet); community join doesn't send the Resend welcome / workshop enrollment yet (M5).
+- **M5:** comms, analytics, hardening. Anonymous safeguarding report (`/safeguarding`, public/no-auth, service-role write) + admin review (`/admin/safeguarding`). Admin funnel dashboard (`/admin/dashboard`, Recharts) over the §15 metrics. Email via `lib/email.ts` (Resend HTTP API, no-op if unset) wired into community-join welcome. In-memory rate limiter (`lib/rate-limit.ts`) on OTP resend + safeguarding submit. Shared `SiteFooter` with the safeguarding link + Mastercard Foundation acknowledgment (body copy, never abbreviated). A11y: reduced-motion (global), `aria-live` timer, `aria-pressed` answer options, focus-visible rings.
+
+**All §16 milestones (M0–M5) are implemented.** Remaining for launch are operational, not code: a real Supabase project + env, the §19 decisions (esp. raffu coupling), and the deferred downstream integrations below.
+
+Known stubs / not-yet-wired (intentional): CRM/ERP sync leaves `synced_to_crm=false` (no sync worker); workshop enrollment on community join (downstream, community-team owned); raffu uses the API abstraction unless switched to shared-DB; `lib/rate-limit.ts` is per-instance (back with Redis for hard limits across instances); email/SMS require Resend/Twilio keys.
 
 **raffu coupling (§19 open decision):** `lib/raffu.ts` abstracts it behind `enterRaffle()`. Current default = HTTP API call when `RAFFU_BASE_URL`/`RAFFU_SERVICE_KEY` are set, else a safe no-op (entry still mirrored locally). Switch to shared-Supabase direct inserts there if that's the chosen path. The leaderboard requires Realtime enabled on `leaderboard_entries` (the 0003 migration adds it to the `supabase_realtime` publication).
 
@@ -56,6 +60,10 @@ The auth flow cannot be exercised end-to-end locally until a real Supabase proje
 - `app/leaderboard/` — realtime per-category board (browser Supabase subscription).
 - `app/raffle/`, `app/admin/raffle/` — player raffle view + admin draw.
 - `app/card/[attemptId]/` — public shareable score card.
+- `app/safeguarding/`, `app/admin/safeguarding/` — anonymous report + admin review.
+- `app/admin/dashboard/` — Recharts funnel dashboard (server compute + client charts).
+- `lib/email.ts` — `server-only` Resend HTTP wrapper. `lib/rate-limit.ts` — in-memory limiter.
+- `components/site-footer.tsx` — safeguarding link + Foundation acknowledgment.
 - `lib/supabase/` — `client.ts` (browser, anon), `server.ts` (RLS-scoped, Server Components/Actions/Route Handlers), `admin.ts` (service role, `server-only`, the *only* path to `correct_index`/grading), `middleware.ts` (session refresh).
 - `lib/anthropic.ts` — `server-only` Anthropic client for the admin generation flow; model id in `GENERATION_MODEL`.
 - `middleware.ts` — root middleware wiring Supabase session refresh.

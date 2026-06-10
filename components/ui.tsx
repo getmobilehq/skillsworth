@@ -92,7 +92,7 @@ export function Button({ variant = "primary", className, ...props }: ButtonProps
   return (
     <button
       {...props}
-      className={`flex w-full items-center justify-center gap-2 rounded-btn px-[18px] py-[15px] text-[15px] font-semibold transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 ${VARIANT[variant]} ${className ?? ""}`}
+      className={`flex w-full items-center justify-center gap-2 rounded-btn px-[18px] py-[15px] text-[15px] font-semibold transition active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-deep focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45 ${VARIANT[variant]} ${className ?? ""}`}
     />
   );
 }

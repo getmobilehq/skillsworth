@@ -406,6 +406,9 @@ export default function PlayClient({
               />
             </div>
             <span
+              role="timer"
+              aria-live="polite"
+              aria-label={`Time remaining: ${mm}`}
               className={`min-w-[38px] text-right text-[13px] font-bold tabular-nums ${
                 low ? "text-red" : "text-deep"
               }`}
@@ -426,12 +429,15 @@ export default function PlayClient({
                     return (
                       <button
                         key={oi}
+                        type="button"
+                        aria-pressed={selected}
+                        aria-label={`Option ${String.fromCharCode(65 + oi)}: ${op}`}
                         onClick={() => {
                           const a = [...answers];
                           a[qi] = oi;
                           setAnswers(a);
                         }}
-                        className={`flex items-center gap-[11px] rounded-[13px] border-[1.5px] px-[15px] py-[14px] text-left text-[14.5px] leading-[1.35] transition ${
+                        className={`flex items-center gap-[11px] rounded-[13px] border-[1.5px] px-[15px] py-[14px] text-left text-[14.5px] leading-[1.35] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-deep ${
                           selected
                             ? "border-green bg-green-50"
                             : "border-[#DCE6E0] bg-white hover:border-green"

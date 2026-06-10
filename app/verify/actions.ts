@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { rateLimit } from "@/lib/rate-limit";
 
 export type VerifyState = { error?: string };
 
@@ -52,6 +53,9 @@ export async function resendOtp(): Promise<void> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/signup");
+
+  // Throttle resends per user (best-effort; see lib/rate-limit caveat).
+  if (!rateLimit(`otp-resend:${user.id}`, 3, 60_000)) return;
 
   const { data: profile } = await supabase
     .from("profiles")
