@@ -2,8 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Sparkles, Timer, Check, X, ArrowRight, ChevronRight } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  Sparkles,
+  Timer,
+  Check,
+  X,
+  ArrowRight,
+  ChevronRight,
+  ShieldQuestion,
+  RotateCcw,
+  GraduationCap,
+  Trophy,
+} from "lucide-react";
 import { AppShell, Eyebrow, Card, Button, Tagline } from "@/components/ui";
+import { doorFor } from "@/lib/play";
 import {
   beginAttempt,
   serveLevel,
@@ -12,6 +25,12 @@ import {
   type ServedQuestion,
   type RevealData,
 } from "@/app/play/actions";
+import {
+  acceptResult,
+  requestReview,
+  joinCommunity,
+  beginReprove,
+} from "@/app/play/funnel-actions";
 
 export type LevelMeta = {
   level: number;
@@ -20,7 +39,16 @@ export type LevelMeta = {
   time_seconds: number;
 };
 
-type Screen = "intro" | "loading" | "play" | "graded" | "reveal" | "blocked";
+type Screen =
+  | "intro"
+  | "loading"
+  | "play"
+  | "graded"
+  | "reveal"
+  | "dispute"
+  | "reviewed"
+  | "accepted"
+  | "blocked";
 type Graded = {
   perQuestion: { correctIndex: number; isCorrect: boolean }[];
   correctCount: number;
@@ -30,6 +58,7 @@ type Graded = {
   nextLevel: number | null;
 };
 type ClimbRow = { level: number; correctCount: number; passed: boolean };
+type Accepted = { tier: "A" | "B" | "C"; destination: string; reachedLevel: number };
 
 const CONF_COLORS = ["#E9473A", "#FDC00D", "#00B75B", "#8FC14E"];
 
@@ -38,15 +67,22 @@ export default function PlayClient({
   skillName,
   levels,
   mode,
+  resumeAttemptId = null,
+  reproveLevel = null,
 }: {
   skillId: string;
   skillName: string;
   levels: LevelMeta[];
   mode: Mode;
+  resumeAttemptId?: string | null;
+  reproveLevel?: number | null;
 }) {
-  const [screen, setScreen] = useState<Screen>("intro");
-  const [attemptId, setAttemptId] = useState<string | null>(null);
-  const [level, setLevel] = useState(1);
+  const router = useRouter();
+  const isReprove = Boolean(resumeAttemptId && reproveLevel);
+
+  const [screen, setScreen] = useState<Screen>(isReprove ? "loading" : "intro");
+  const [attemptId, setAttemptId] = useState<string | null>(resumeAttemptId);
+  const [level, setLevel] = useState(reproveLevel ?? 1);
   const [questions, setQuestions] = useState<ServedQuestion[]>([]);
   const [answers, setAnswers] = useState<number[]>([]);
   const [timeLeft, setTimeLeft] = useState(0);
@@ -55,6 +91,10 @@ export default function PlayClient({
   const [climb, setClimb] = useState<ClimbRow[]>([]);
   const [error, setError] = useState<string | undefined>();
   const [confetti, setConfetti] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [accepted, setAccepted] = useState<Accepted | null>(null);
+  const [joined, setJoined] = useState(false);
+  const [disputeNote, setDisputeNote] = useState("");
 
   const answersRef = useRef<number[]>([]);
   const submittingRef = useRef(false);
@@ -64,6 +104,7 @@ export default function PlayClient({
 
   const levelMeta = levels.find((l) => l.level === level);
   const allAnswered = answers.length > 0 && answers.every((a) => a >= 0);
+  const reachedLevel = reveal?.reachedLevel ?? 0;
 
   const fireConfetti = (ms = 2400) => {
     setConfetti(true);
@@ -91,16 +132,18 @@ export default function PlayClient({
     [skillId, mode],
   );
 
+  // Re-prove resume: drop straight into the target level (§5).
+  useEffect(() => {
+    if (isReprove && reproveLevel) loadLevel(reproveLevel, resumeAttemptId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const start = async () => {
     setError(undefined);
     const res = await beginAttempt(skillId, mode);
     if (!res.ok) {
-      if (res.alreadyPlayed) {
-        setError(res.error);
-        setScreen("blocked");
-      } else {
-        setError(res.error);
-      }
+      setError(res.error);
+      if (res.alreadyPlayed) setScreen("blocked");
       return;
     }
     setAttemptId(res.attemptId);
@@ -117,6 +160,7 @@ export default function PlayClient({
       mode,
       answers: answersRef.current,
       servedIds: questions.map((q) => q.id),
+      reprove: isReprove,
     });
     if (!res.ok) {
       setError(res.error);
@@ -138,10 +182,8 @@ export default function PlayClient({
     if (res.reveal) setReveal(res.reveal);
     if (res.passed) fireConfetti();
     setScreen("graded");
-  }, [attemptId, skillId, level, mode, questions]);
+  }, [attemptId, skillId, level, mode, questions, isReprove]);
 
-  // Server-enforced timer is authoritative; this client countdown is the UX
-  // mirror and triggers auto-submit on expiry (handoff §3.2, §8).
   useEffect(() => {
     if (screen !== "play") return;
     if (timeLeft <= 0) {
@@ -160,8 +202,95 @@ export default function PlayClient({
     }
   };
 
+  // ── funnel handlers (§5, §10, §12)
+  const onAccept = async () => {
+    if (!attemptId) return;
+    setBusy(true);
+    setError(undefined);
+    const res = await acceptResult(attemptId);
+    setBusy(false);
+    if (res.ok) {
+      setAccepted({ tier: res.tier, destination: res.destination, reachedLevel: res.reachedLevel });
+      setScreen("accepted");
+    } else setError(res.error);
+  };
+
+  const onReprove = async () => {
+    if (!attemptId) return;
+    setBusy(true);
+    setError(undefined);
+    const res = await beginReprove(attemptId);
+    if (res.ok) {
+      router.push(`/play/${res.skillId}?attempt=${attemptId}&level=${res.level}`);
+    } else {
+      setBusy(false);
+      setError(res.error);
+    }
+  };
+
+  const onReview = async () => {
+    if (!attemptId) return;
+    setBusy(true);
+    setError(undefined);
+    const res = await requestReview(attemptId, disputeNote);
+    setBusy(false);
+    if (res.ok) setScreen("reviewed");
+    else setError(res.error);
+  };
+
+  const onJoin = async () => {
+    if (!attemptId) return;
+    setBusy(true);
+    const res = await joinCommunity(attemptId);
+    setBusy(false);
+    if (res.ok) {
+      setJoined(true);
+      fireConfetti(2000);
+    } else setError(res.error);
+  };
+
   const mm = `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, "0")}`;
   const low = timeLeft <= 10;
+
+  const proveAnother = (
+    <Link
+      href="/skills"
+      className="flex w-full items-center justify-center gap-2 rounded-btn border-[1.5px] border-green bg-white px-[18px] py-[15px] text-[15px] font-semibold text-deep"
+    >
+      <Sparkles size={15} /> Prove another skill
+    </Link>
+  );
+
+  const communityCTA = joined ? (
+    <Card tone="wash" className="pop">
+      <div className="flex items-center gap-2">
+        <Check size={16} className="text-green" />
+        <span className="text-[14px] font-bold text-deep">
+          You’ve joined the TTS Community
+        </span>
+      </div>
+      <p className="mt-[6px] text-[12.5px] text-muted">
+        Expect an invite to free training and your first workshop, with placement
+        support as you level up.
+      </p>
+    </Card>
+  ) : (
+    <Card tone="deep" className="pop">
+      <Eyebrow tone="lemon">Ready to level up?</Eyebrow>
+      <p className="mt-2 text-[14.5px] leading-[1.5] text-white">
+        Join the <b>TTS Community</b> for better job opportunities, <b>free
+        training</b>, and job placement. We’ll help you close the gap to
+        match-ready.
+      </p>
+      <button
+        onClick={onJoin}
+        disabled={busy}
+        className="mt-[14px] flex w-full items-center justify-center gap-2 rounded-btn bg-lemon px-[18px] py-[15px] text-[15px] font-semibold text-deep disabled:opacity-45"
+      >
+        <GraduationCap size={16} /> Take action now
+      </button>
+    </Card>
+  );
 
   return (
     <AppShell>
@@ -457,23 +586,143 @@ export default function PlayClient({
             })}
           </div>
 
-          {mode === "scored" && (
-            <Card tone="cream" className="mt-4">
-              <p className="text-[12.5px] leading-[1.45] text-ink">
-                Accept or dispute your result, and your next step (raffle or
-                community) — coming in <b>M3</b>.
+          {error && <p className="mt-4 text-[12.5px] text-red">{error}</p>}
+
+          {mode === "scored" ? (
+            <div className="mt-5 flex gap-[10px]">
+              <Button className="flex-1" disabled={busy} onClick={onAccept}>
+                <Check size={16} /> Accept
+              </Button>
+              <Button
+                variant="ghost"
+                className="flex-1"
+                disabled={busy}
+                onClick={() => setScreen("dispute")}
+              >
+                <ShieldQuestion size={16} /> Dispute
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-5">{proveAnother}</div>
+          )}
+          <Tagline />
+        </div>
+      )}
+
+      {screen === "dispute" && (
+        <div>
+          <Eyebrow>Not your full worth?</Eyebrow>
+          <h2 className="mt-2 font-display text-[26px] font-extrabold text-deep">
+            Dispute it.
+          </h2>
+          <p className="mt-2 text-[13.5px] leading-[1.45] text-muted">
+            Two ways to challenge your band. Prove more, or ask a person to review
+            it.
+          </p>
+
+          {reachedLevel < 4 && (
+            <Card tone="wash" className="mt-[18px]">
+              <Eyebrow tone="deep">Prove more</Eyebrow>
+              <p className="mt-[7px] text-[13.5px] leading-[1.45] text-ink">
+                Take on <b>Level {reachedLevel + 1}</b> (timed). Clear it and your
+                band moves up on the spot.
               </p>
+              <button
+                onClick={onReprove}
+                disabled={busy}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-btn bg-deep px-[18px] py-[14px] text-[15px] font-semibold text-lemon disabled:opacity-45"
+              >
+                <RotateCcw size={15} /> Attempt level {reachedLevel + 1}
+              </button>
             </Card>
           )}
 
-          <div className="mt-5 flex flex-col gap-3">
-            <Link
-              href="/skills"
-              className="flex w-full items-center justify-center gap-2 rounded-btn border-[1.5px] border-green bg-white px-[18px] py-[15px] text-[15px] font-semibold text-deep"
+          <Card tone="plain" className="mt-[14px]">
+            <Eyebrow>Ask for a human review</Eyebrow>
+            <p className="mt-[7px] text-[13px] leading-[1.45] text-muted">
+              Tell the calibration team why the result is off. Your current band
+              stands until they review.
+            </p>
+            <textarea
+              value={disputeNote}
+              onChange={(e) => setDisputeNote(e.target.value)}
+              placeholder="e.g. The questions didn’t cover my main tools…"
+              className="mt-[10px] min-h-[74px] w-full resize-none rounded-field border-[1.5px] border-[#DCE6E0] p-3 text-[14px] outline-none focus:border-green"
+            />
+            <button
+              onClick={onReview}
+              disabled={busy || !disputeNote.trim()}
+              className="mt-[10px] flex w-full items-center justify-center gap-2 rounded-btn border-[1.5px] border-green bg-white px-[18px] py-[14px] text-[15px] font-semibold text-deep disabled:opacity-45"
             >
-              <Sparkles size={15} /> Prove another skill
-            </Link>
-          </div>
+              Send to calibration team
+            </button>
+          </Card>
+
+          {error && <p className="mt-4 text-[12.5px] text-red">{error}</p>}
+          <Button variant="lemon" className="mt-4" disabled={busy} onClick={onAccept}>
+            Actually, I’ll accept it
+          </Button>
+        </div>
+      )}
+
+      {screen === "reviewed" && (
+        <div className="flex min-h-[70vh] flex-col justify-center">
+          <Card tone="wash" className="pop">
+            <Eyebrow tone="deep">Dispute logged</Eyebrow>
+            <h2 className="mt-2 font-display text-[24px] font-extrabold text-deep">
+              A person will look at this.
+            </h2>
+            <p className="mt-[10px] text-[13.5px] leading-[1.5] text-ink">
+              Your note is flagged to the calibration team. You’ll hear back by
+              email. Until then, your current band stands.
+            </p>
+          </Card>
+          <Button className="mt-5" disabled={busy} onClick={onAccept}>
+            Continue <ArrowRight size={16} />
+          </Button>
+        </div>
+      )}
+
+      {screen === "accepted" && accepted && (
+        <div>
+          <Card tone="deep" className="pop">
+            <Eyebrow tone="lemon">Locked in · Tier {accepted.tier}</Eyebrow>
+            {reveal && reveal.reachedLevel >= 1 && reveal.nairaLow != null ? (
+              <div className="mt-2 font-display text-[34px] font-extrabold leading-none text-lemon">
+                ₦{Math.round(reveal.nairaLow / 1000)}k–
+                {Math.round((reveal.nairaHigh ?? 0) / 1000)}k
+              </div>
+            ) : null}
+            <p className="mt-2 text-[13px] text-white/80">
+              {reveal?.bandLabel ?? "Emerging"} · {skillName}
+            </p>
+          </Card>
+
+          <Card tone="wash" className="mt-[14px]">
+            <Eyebrow tone="deep">Your next step</Eyebrow>
+            <p className="mt-2 text-[14px] font-semibold leading-[1.5] text-deep">
+              {doorFor(accepted.tier)}.
+            </p>
+          </Card>
+
+          {accepted.tier === "A" ? (
+            <Card tone="cream" className="mt-3">
+              <div className="flex items-center gap-2">
+                <Trophy size={16} className="text-deep" />
+                <span className="text-[14px] font-bold text-deep">
+                  You’re Tier A — match-ready 🎉
+                </span>
+              </div>
+              <p className="mt-[6px] text-[12.5px] text-muted">
+                We’ve routed you to QTP for matching. Friday’s raffle auto-entry
+                (Level 3+) arrives in <b>M4</b>.
+              </p>
+            </Card>
+          ) : (
+            <div className="mt-3">{communityCTA}</div>
+          )}
+
+          <div className="mt-5">{proveAnother}</div>
           <Tagline />
         </div>
       )}

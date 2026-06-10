@@ -25,6 +25,13 @@ export function destinationFor(tier: "A" | "B" | "C"): string {
   return tier === "A" ? "qtp" : "community";
 }
 
+/** Player-facing next-step copy per tier (handoff §10). */
+export function doorFor(tier: "A" | "B" | "C"): string {
+  if (tier === "A") return "Routed to a QTP partner with active demand";
+  if (tier === "B") return "Workshop track — mentorship and a 90-day re-grade";
+  return "Honest feedback and a foundational route up";
+}
+
 /** Score = Σ (correct answers × level) across graded levels (mirrors prototype). */
 export function scoreFromLevels(
   graded: { level: number; correct_count: number }[],

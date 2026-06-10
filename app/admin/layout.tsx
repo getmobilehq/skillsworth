@@ -13,9 +13,14 @@ export default function AdminLayout({
           <Link href="/admin" className="font-display text-lg font-extrabold text-deep">
             Calibration <span className="text-green">desk</span>
           </Link>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-            Prove Your Worth
-          </span>
+          <nav className="flex items-center gap-4 text-[12.5px] font-semibold text-muted">
+            <Link href="/admin" className="hover:text-deep">
+              Skills
+            </Link>
+            <Link href="/admin/disputes" className="hover:text-deep">
+              Disputes
+            </Link>
+          </nav>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-6 py-8">{children}</main>

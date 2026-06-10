@@ -1,7 +1,7 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { currentVerifiedUser } from "@/lib/current-user";
 import {
   isoWeek,
   tierFor,
@@ -52,21 +52,6 @@ export type SubmitResult =
   | { ok: false; error: string };
 
 // ───────────────────────────────────────────────────────────── helpers
-
-async function currentVerifiedUser() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("phone_verified")
-    .eq("id", user.id)
-    .single();
-  if (!profile?.phone_verified) return null;
-  return user;
-}
 
 async function levelTimeSeconds(
   db: ReturnType<typeof createAdminClient>,
@@ -245,8 +230,9 @@ export async function submitLevel(args: {
   mode: Mode;
   answers: number[]; // index per served question, -1 if unanswered
   servedIds: string[]; // used for practice only; scored uses stored ids
+  reprove?: boolean; // dispute re-prove: one level only, then finalize (§5)
 }): Promise<SubmitResult> {
-  const { attemptId, skillId, level, mode, answers } = args;
+  const { attemptId, skillId, level, mode, answers, reprove } = args;
   const user = await currentVerifiedUser();
   if (!user) return { ok: false, error: "Please sign in and verify your phone." };
 
@@ -305,8 +291,9 @@ export async function submitLevel(args: {
   });
   const correctCount = perQuestion.filter((p) => p.isCorrect).length;
   const passed = correctCount >= PASS_THRESHOLD;
-  const terminal = !passed || level >= 4;
-  const nextLevel = passed && level < 4 ? level + 1 : null;
+  // A re-prove is a single-level challenge: finalize after it either way (§5).
+  const terminal = reprove || !passed || level >= 4;
+  const nextLevel = !reprove && passed && level < 4 ? level + 1 : null;
 
   // Practice: return result, persist nothing.
   if (mode === "practice" || !attemptId) {

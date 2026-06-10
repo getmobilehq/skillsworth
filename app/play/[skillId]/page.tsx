@@ -10,7 +10,7 @@ export default async function PlayPage({
   searchParams,
 }: {
   params: { skillId: string };
-  searchParams: { mode?: string };
+  searchParams: { mode?: string; attempt?: string; level?: string };
 }) {
   const supabase = createClient();
   const {
@@ -40,12 +40,18 @@ export default async function PlayPage({
 
   const mode = searchParams.mode === "practice" ? "practice" : "scored";
 
+  // Re-prove resume: ?attempt=<id>&level=<n> drops straight into one level (§5).
+  const resumeAttemptId = searchParams.attempt ?? null;
+  const reproveLevel = searchParams.level ? Number(searchParams.level) : null;
+
   return (
     <PlayClient
       skillId={skill.id}
       skillName={skill.name}
       levels={(levels ?? []) as LevelMeta[]}
       mode={mode}
+      resumeAttemptId={resumeAttemptId}
+      reproveLevel={reproveLevel}
     />
   );
 }

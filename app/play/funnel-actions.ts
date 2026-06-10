@@ -1,0 +1,156 @@
+"use server";
+
+import { createAdminClient } from "@/lib/supabase/admin";
+import { currentVerifiedUser } from "@/lib/current-user";
+import { tierFor, destinationFor } from "@/lib/play";
+
+// Accept / dispute / route — the funnel (handoff §5, §10, §12).
+
+export type AcceptResult =
+  | { ok: true; tier: "A" | "B" | "C"; destination: string; reachedLevel: number }
+  | { ok: false; error: string };
+
+/**
+ * Accept the result: record the routing for the attempt's tier. Tier A is
+ * flagged for CRM/ERP sync (synced_to_crm stays false until a sync worker
+ * picks it up — see §10). Idempotent per attempt.
+ */
+export async function acceptResult(attemptId: string): Promise<AcceptResult> {
+  const user = await currentVerifiedUser();
+  if (!user) return { ok: false, error: "Please sign in and verify your phone." };
+
+  const db = createAdminClient();
+  const { data: attempt } = await db
+    .from("attempts")
+    .select("user_id, status, reached_level, tier")
+    .eq("id", attemptId)
+    .single();
+  if (!attempt || attempt.user_id !== user.id)
+    return { ok: false, error: "Attempt not found." };
+  if (attempt.status !== "complete")
+    return { ok: false, error: "Finish your run before accepting." };
+
+  const tier = (attempt.tier as "A" | "B" | "C" | null) ?? tierFor(attempt.reached_level);
+  const destination = destinationFor(tier);
+
+  const { data: existing } = await db
+    .from("routings")
+    .select("id")
+    .eq("attempt_id", attemptId)
+    .maybeSingle();
+  if (!existing) {
+    await db.from("routings").insert({
+      attempt_id: attemptId,
+      tier,
+      destination,
+      synced_to_crm: false,
+    });
+  }
+
+  return { ok: true, tier, destination, reachedLevel: attempt.reached_level };
+}
+
+export type SimpleResult = { ok: boolean; error?: string };
+
+/**
+ * Dispute → human review. Logs a dispute for the calibration desk (Ashley).
+ * The current band stands until reviewed (§5).
+ */
+export async function requestReview(
+  attemptId: string,
+  note: string,
+): Promise<SimpleResult> {
+  const user = await currentVerifiedUser();
+  if (!user) return { ok: false, error: "Please sign in and verify your phone." };
+  if (!note.trim()) return { ok: false, error: "Add a note for the team." };
+
+  const db = createAdminClient();
+  const { data: attempt } = await db
+    .from("attempts")
+    .select("user_id")
+    .eq("id", attemptId)
+    .single();
+  if (!attempt || attempt.user_id !== user.id)
+    return { ok: false, error: "Attempt not found." };
+
+  const { error } = await db.from("disputes").insert({
+    attempt_id: attemptId,
+    type: "review",
+    note: note.trim(),
+    status: "open",
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
+ * L1/L2 community join (§12). Records the conversion; welcome email + workshop
+ * enrollment are wired in M5 comms.
+ */
+export async function joinCommunity(attemptId: string): Promise<SimpleResult> {
+  const user = await currentVerifiedUser();
+  if (!user) return { ok: false, error: "Please sign in and verify your phone." };
+
+  const db = createAdminClient();
+  const { data: existing } = await db
+    .from("community_joins")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("attempt_id", attemptId)
+    .maybeSingle();
+  if (existing) return { ok: true };
+
+  const { error } = await db.from("community_joins").insert({
+    user_id: user.id,
+    attempt_id: attemptId,
+    status: "joined",
+  });
+  if (error) return { ok: false, error: error.message };
+  // TODO(M5): trigger Resend welcome + workshop enrollment.
+  return { ok: true };
+}
+
+export type ReproveResult =
+  | { ok: true; skillId: string; level: number }
+  | { ok: false; error: string };
+
+/**
+ * Dispute → re-prove. Re-opens the attempt and resets the next level so the
+ * player can attempt it live; clearing it upgrades the band (§5).
+ */
+export async function beginReprove(attemptId: string): Promise<ReproveResult> {
+  const user = await currentVerifiedUser();
+  if (!user) return { ok: false, error: "Please sign in and verify your phone." };
+
+  const db = createAdminClient();
+  const { data: attempt } = await db
+    .from("attempts")
+    .select("user_id, status, reached_level, skill_id")
+    .eq("id", attemptId)
+    .single();
+  if (!attempt || attempt.user_id !== user.id)
+    return { ok: false, error: "Attempt not found." };
+  if (attempt.reached_level >= 4)
+    return { ok: false, error: "You’re already at the top level." };
+
+  const target = attempt.reached_level + 1;
+
+  // Fresh serve for the target level (clears any prior failed row).
+  await db
+    .from("attempt_levels")
+    .delete()
+    .eq("attempt_id", attemptId)
+    .eq("level", target);
+
+  await db
+    .from("attempts")
+    .update({
+      status: "in_progress",
+      completed_at: null,
+      tier: null,
+      band_label: null,
+    })
+    .eq("id", attemptId);
+
+  return { ok: true, skillId: attempt.skill_id, level: target };
+}
