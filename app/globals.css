@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* TTS Nigeria design tokens — handoff §14. CSS-var mirror of tailwind.config.ts
+   so prototype-style inline styles port cleanly. */
+:root {
+  --deep: #004931;
+  --green: #00b75b;
+  --lemon: #8fc14e;
+  --yellow: #fdc00d;
+  --cream: #fff5cc;
+  --red: #e9473a;
+  --green50: #edf8ec;
+  --ink: #0e0f0f;
+  --muted: #4a5c53;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    background: #fbfbf8;
+    color: var(--ink);
+    font-family: "Inter", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: "Bricolage Grotesque", sans-serif;
+  }
+}
+
+/* Respect reduced motion globally — handoff §3.10 / §14 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
