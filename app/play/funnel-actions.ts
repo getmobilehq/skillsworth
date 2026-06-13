@@ -3,7 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { currentVerifiedUser } from "@/lib/current-user";
 import { tierFor, destinationFor } from "@/lib/play";
-import { enterRaffle } from "@/lib/raffu";
+import { enterRaffle, raffleSlug } from "@/lib/raffu";
 import { sendEmail, communityWelcomeHtml } from "@/lib/email";
 
 // Accept / dispute / route — the funnel (handoff §5, §10, §11, §12).
@@ -58,7 +58,7 @@ export async function acceptResult(attemptId: string): Promise<AcceptResult> {
       .single(),
   ]);
   const name = displayName(profile?.first_name, profile?.last_name);
-  const slug = `skill-worth-${attempt.week_iso}`;
+  const slug = raffleSlug(attempt.week_iso);
 
   // Leaderboard post (idempotent on attempt_id) — display-safe fields only.
   await db.from("leaderboard_entries").upsert(

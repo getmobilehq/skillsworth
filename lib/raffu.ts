@@ -22,9 +22,17 @@ import { isoWeek } from "@/lib/play";
 // no-ops so the funnel still works (the local raffle_entries mirror is the
 // record of truth either way).
 
-/** Weekly raffle slug, e.g. "skill-worth-2026-W24". Matches the raffu raffle. */
+/**
+ * Weekly raffle slug, e.g. "skill-worth-2026-w24" — the single source of truth
+ * for the slug on both sides. Lowercased because raffu's slug rule is
+ * /^[a-z0-9]+(?:-[a-z0-9]+)*$/ (no uppercase), while isoWeek() yields "2026-W24".
+ */
+export function raffleSlug(weekIso: string): string {
+  return `skill-worth-${weekIso}`.toLowerCase();
+}
+
 export function raffleSlugFor(date: Date): string {
-  return `skill-worth-${isoWeek(date)}`;
+  return raffleSlug(isoWeek(date));
 }
 
 let cached: SupabaseClient | null = null;
