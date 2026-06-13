@@ -19,9 +19,9 @@ The Next.js scaffold, **M0 (auth foundations)**, and **M1 (generation + calibrat
 
 **All §16 milestones (M0–M5) are implemented.** Remaining for launch are operational, not code: a real Supabase project + env, the §19 decisions (esp. raffu coupling), and the deferred downstream integrations below.
 
-Known stubs / not-yet-wired (intentional): CRM/ERP sync leaves `synced_to_crm=false` (no sync worker); workshop enrollment on community join (downstream, community-team owned); raffu uses the API abstraction unless switched to shared-DB; `lib/rate-limit.ts` is per-instance (back with Redis for hard limits across instances); email/SMS require Resend/Twilio keys.
+Known stubs / not-yet-wired (intentional): CRM/ERP sync leaves `synced_to_crm=false` (no sync worker); workshop enrollment on community join (downstream, community-team owned); raffu entry is live (cross-project insert) but depends on the weekly raffle being provisioned in raffu's dashboard; `lib/rate-limit.ts` is per-instance (back with Redis for hard limits across instances); email/SMS require Resend/Twilio keys.
 
-**raffu coupling (§19 open decision):** `lib/raffu.ts` abstracts it behind `enterRaffle()`. Current default = HTTP API call when `RAFFU_BASE_URL`/`RAFFU_SERVICE_KEY` are set, else a safe no-op (entry still mirrored locally). Switch to shared-Supabase direct inserts there if that's the chosen path. The leaderboard requires Realtime enabled on `leaderboard_entries` (the 0003 migration adds it to the `supabase_realtime` publication).
+**raffu coupling (§19 — RESOLVED):** cross-project direct insert with raffu's **anon key**, in `lib/raffu.ts`. Grounded in the real raffu source (`/Users/josephagunbiade/Desktop/studio/raffu`): its `entries` table is `(raffle_id, first_name, last_name)` only, keyed by `raffle_id` (looked up from `raffles.slug`), and RLS allows a public/anon insert while `raffles.status='collecting'` — there is no REST API. `enterRaffle()` points a Supabase client at raffu's OWN project (`RAFFU_SUPABASE_URL`/`RAFFU_SUPABASE_ANON_KEY`), resolves the weekly slug → raffle id → inserts the name; the rich data (skill/band/score) stays in skillsworth's local `raffle_entries` mirror (the record of truth). Unset env = safe no-op. **A shared Supabase project is NOT viable** — both apps define `public.profiles` with conflicting schemas + an `on_auth_user_created` trigger that collide. Operational dependency: the weekly raffle (slug `skill-worth-<ISOweek>`) must be created in raffu's dashboard and set to `collecting`. The leaderboard requires Realtime enabled on `leaderboard_entries` (0003 adds it to the `supabase_realtime` publication).
 
 Reference docs:
 
@@ -56,7 +56,7 @@ The auth flow cannot be exercised end-to-end locally until a real Supabase proje
 - `lib/play.ts` — pure helpers: `isoWeek`, `tierFor`, `destinationFor`, `doorFor`, `scoreFromLevels`, `shuffle`, thresholds.
 - `lib/current-user.ts` — `currentVerifiedUser()` shared by play + funnel actions.
 - `app/play/funnel-actions.ts` — accept/dispute/join/reprove (service-role writes after ownership check); accept also posts the leaderboard entry + raffle entry.
-- `lib/raffu.ts` — `server-only` raffu abstraction (`enterRaffle`, `raffleSlugFor`).
+- `lib/raffu.ts` — `server-only` cross-project insert into raffu's `entries` via raffu's anon key (`enterRaffle`, `raffleSlugFor`).
 - `app/leaderboard/` — realtime per-category board (browser Supabase subscription).
 - `app/raffle/`, `app/admin/raffle/` — player raffle view + admin draw.
 - `app/card/[attemptId]/` — public shareable score card.

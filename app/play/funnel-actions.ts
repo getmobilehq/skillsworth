@@ -93,13 +93,11 @@ export async function acceptResult(attemptId: string): Promise<AcceptResult> {
     });
 
     if (qualified) {
+      // raffu's entries table holds only first/last name; the rich data
+      // (skill, band, score) lives in skillsworth's raffle_entries mirror.
       const entry = await enterRaffle({
-        name,
-        email: user.email ?? "",
-        phone: profile?.phone ?? null,
-        skill: skill?.name ?? "",
-        band: attempt.band_label,
-        score: attempt.score,
+        firstName: profile?.first_name ?? name,
+        lastName: profile?.last_name ?? "",
         slug,
       });
       await db.from("raffle_entries").insert({
