@@ -39,7 +39,7 @@ When the spec marks a decision as open (handoff §19), surface it — do not gue
 The M0 signup flow depends on project-level Supabase config that is NOT in code:
 
 - **Email confirmation OFF.** Phone OTP is the verification step, not email. `signup` writes the `profiles` row immediately after `signUp`, which needs the session that `signUp` only returns when email confirmation is disabled. (Auth → Providers → Email → "Confirm email" off.)
-- **SMS provider configured** (Twilio or MessageBird) for phone OTP. Without it, `updateUser({ phone })` / `verifyOtp` won't send/verify codes. The phone OTP uses the `phone_change` flow on an already-created account.
+- **SMS provider for phone OTP.** Without it, `updateUser({ phone })` / `verifyOtp` won't send/verify codes (phone OTP uses the `phone_change` flow on an already-created account). The project uses **eBulkSMS** (a Nigerian provider not natively supported by Supabase) via a **Send SMS auth hook**: the Edge Function `supabase/functions/send-sms/` verifies the webhook and delivers through eBulkSMS's `sendsms.json`. Deploy + config steps are in that function's header comment; it needs the `SEND_SMS_HOOK_SECRET` / `EBULKSMS_USERNAME` / `EBULKSMS_APIKEY` / `EBULKSMS_SENDER` function secrets (set via `supabase secrets set`, not the app `.env`).
 - Run `supabase/migrations/0001_init.sql` against the project (creates tables + RLS).
 
 The auth flow cannot be exercised end-to-end locally until a real Supabase project is wired into `.env.local`.

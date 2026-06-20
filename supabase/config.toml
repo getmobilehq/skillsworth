@@ -1,0 +1,7 @@
+# Supabase CLI config. project_id is the project ref (already public in the URL).
+project_id = "wsqungrxrwhwmbwbbzjb"
+
+# The Send SMS auth hook is called by Supabase Auth without a user JWT; the
+# Standard Webhooks signature (SEND_SMS_HOOK_SECRET) is what authenticates it.
+[functions.send-sms]
+verify_jwt = false
