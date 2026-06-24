@@ -17,9 +17,8 @@ export default function Home({
       <div className="relative w-full max-w-app overflow-hidden bg-white shadow-[0_0_0_1px_rgba(0,73,49,0.06)]">
         <div className="flex min-h-screen flex-col px-[22px] pb-[30px] pt-[26px]">
           <div className="flex items-center justify-between">
-            <div className="font-display text-lg font-extrabold text-deep">
-              TTS <span className="text-green">Nigeria</span>
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.svg" alt="TTS Nigeria" className="h-10 w-10" />
             <span className="inline-flex items-center gap-[5px] rounded-full bg-green-50 px-[10px] py-1 text-[11px] font-semibold text-deep">
               <Sparkles size={12} /> Skill Worth
             </span>
