@@ -1,0 +1,10 @@
+# Netlify config for the Next.js 14 App Router app.
+# Netlify auto-installs @netlify/plugin-nextjs (the Next runtime) on detection;
+# it serves Server Components, Server Actions, and middleware (as edge functions).
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # Pin a current LTS; the app is built/tested on Node 20+.
+  NODE_VERSION = "20"
