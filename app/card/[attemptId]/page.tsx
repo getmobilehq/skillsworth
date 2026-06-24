@@ -52,9 +52,8 @@ export default async function CardPage({
       <div className="w-full max-w-app">
         <div className="rounded-card bg-deep p-7 text-white">
           <div className="flex items-center justify-between">
-            <span className="font-display text-[15px] font-extrabold">
-              TTS <span className="text-green">Nigeria</span>
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-white.svg" alt="TTS Nigeria" className="h-9 w-9" />
             <span className="inline-flex items-center gap-[5px] rounded-full bg-white/10 px-[10px] py-1 text-[11px] font-semibold text-lemon">
               <Sparkles size={12} /> Skill Worth
             </span>
