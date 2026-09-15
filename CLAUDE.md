@@ -32,9 +32,35 @@ When the spec marks a decision as open (handoff §19), surface it — do not gue
 
 ## Commands
 
-`npm run dev` (local) · `npm run build` · `npm run typecheck` (tsc --noEmit) · `npm run lint`. Copy `.env.example` → `.env.local` and fill in before running. DB migrations live in `supabase/migrations`.
+`supabase start` (local Docker Postgres+Auth, see below) · `npm run dev -- -p 3001` (local; **not** 3000 — something on the dev machine probes `localhost:3000/health` and shuts down whatever answers it) · `npm run build` · `npm run typecheck` (tsc --noEmit) · `npm run lint`. Copy `.env.example` → `.env.local` and fill in before running. DB migrations live in `supabase/migrations`.
 
-## Supabase project setup (required for the auth flow to run)
+## Local Supabase (Docker) — the default way to run
+
+`supabase start` brings the whole stack up in Docker from `supabase/config.toml`
+and applies `supabase/migrations/*.sql` on first boot. No cloud project needed.
+
+- **Ports are shifted to 544xx** (API 54421, db 54422, Studio 54423, Mailpit
+  54424) because another local Supabase project already holds the default 543xx
+  block. Don't move them back without checking `docker ps`.
+- **`[auth.email] enable_confirmations = false`** — the local equivalent of the
+  dashboard setting below, and required for the same reason.
+- **Phone OTP has no local Twilio.** `[auth.sms.test_otp]` maps
+  `2348030000000`–`2348030000009` (i.e. the UI's `0803 000 000X`) to the fixed
+  code **`123456`**. Any other number will fail — there is no SMS provider.
+- **`[auth.sms] enable_confirmations` MUST stay `true`.** With it `false` GoTrue
+  auto-confirms `updateUser({ phone })` and never issues a code, so `/verify`'s
+  `verifyOtp({ type: "phone_change" })` 403s with "User not found".
+- Env: point `NEXT_PUBLIC_SUPABASE_URL` / `..._ANON_KEY` /
+  `SUPABASE_SERVICE_ROLE_KEY` at `supabase status -o env`. Leave the `RAFFU_*`
+  vars unset locally so `enterRaffle()` takes its no-op path.
+- Grant yourself the calibration desk after signing up (per `0002_admin.sql`):
+
+  ```sql
+  update public.profiles set is_admin = true
+  where id = (select id from auth.users where email = '<you>@example.com');
+  ```
+
+## Supabase project setup (cloud / production)
 
 The M0 signup flow depends on project-level Supabase config that is NOT in code:
 
@@ -42,7 +68,7 @@ The M0 signup flow depends on project-level Supabase config that is NOT in code:
 - **SMS provider for phone OTP = Twilio Verify (native).** Without it, `updateUser({ phone })` / `verifyOtp` won't send/verify codes (phone OTP uses the `phone_change` flow on an already-created account). Configured in **Authentication → Providers → Phone → Twilio Verify** with the Twilio Account SID, Auth Token, and Verify Service SID — all in the **Supabase dashboard**, not the app `.env` (Supabase calls Twilio server-side). The earlier eBulkSMS Send-SMS-hook Edge Function was removed once Twilio Verify was wired (see git history); if you ever go back to a non-native provider, that hook pattern is the way. Twilio gotchas: enable **Nigeria** under Messaging → Geo Permissions, and a paid (non-trial) account for unrestricted sends.
 - Run `supabase/migrations/0001_init.sql` against the project (creates tables + RLS).
 
-The auth flow cannot be exercised end-to-end locally until a real Supabase project is wired into `.env.local`.
+These are the cloud counterparts of the local settings above; the local Docker stack is what you actually develop against.
 
 ## Layout
 
