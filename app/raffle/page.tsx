@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, Gift, Star, Trophy } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { raffle_winners } from "@/lib/db/schema";
+import { currentUser } from "@/lib/current-user";
 import { isoWeek } from "@/lib/play";
 import { AppShell, Eyebrow, Card, Tagline } from "@/components/ui";
 
@@ -14,18 +17,18 @@ type Winner = {
 // Player-facing weekly raffle (handoff §11). The draw runs in raffu; winners are
 // mirrored into raffle_winners for the spotlight.
 export default async function RafflePage() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await currentUser();
   if (!user) redirect("/login");
 
   const week = isoWeek(new Date());
-  const { data } = await supabase
-    .from("raffle_winners")
-    .select("kind, display_name, skill_name")
-    .eq("week_iso", week);
-  const winners = (data ?? []) as Winner[];
+  const winners: Winner[] = await db
+    .select({
+      kind: raffle_winners.kind,
+      display_name: raffle_winners.display_name,
+      skill_name: raffle_winners.skill_name,
+    })
+    .from(raffle_winners)
+    .where(eq(raffle_winners.week_iso, week));
   const top = winners.find((w) => w.kind === "top");
   const random = winners.find((w) => w.kind === "random");
 

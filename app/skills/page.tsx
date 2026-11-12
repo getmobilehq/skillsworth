@@ -1,31 +1,26 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChevronRight, Trophy, Gift } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { asc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { skills as skillsTable } from "@/lib/db/schema";
+import { currentUserWithProfile } from "@/lib/current-user";
 import { signOut } from "@/app/login/actions";
 import { AppShell, Eyebrow, Card, Button, Tagline } from "@/components/ui";
 import SiteFooter from "@/components/site-footer";
 
-// Skill pick (handoff §2). Lists LIVE skills (RLS exposes only status='live').
+// Skill pick (handoff §2). Lists LIVE skills only.
 export default async function SkillsPage() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("first_name, phone_verified")
-    .eq("id", user.id)
-    .single();
+  const r = await currentUserWithProfile();
+  if (!r) redirect("/login");
+  const profile = r.profile;
   if (!profile?.phone_verified) redirect("/verify");
 
-  const { data: skills } = await supabase
-    .from("skills")
-    .select("id, name, category")
-    .eq("status", "live")
-    .order("name");
+  const skills = await db
+    .select({ id: skillsTable.id, name: skillsTable.name, category: skillsTable.category })
+    .from(skillsTable)
+    .where(eq(skillsTable.status, "live"))
+    .orderBy(asc(skillsTable.name));
 
   return (
     <AppShell minScreen>

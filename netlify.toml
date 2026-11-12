@@ -6,5 +6,5 @@
   publish = ".next"
 
 [build.environment]
-  # Pin a current LTS; the app is built/tested on Node 20+.
-  NODE_VERSION = "20"
+  # Pin a current LTS (Node 20 is end-of-life).
+  NODE_VERSION = "22"

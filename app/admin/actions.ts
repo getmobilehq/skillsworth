@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { questions, skill_bands, skill_levels, skills } from "@/lib/db/schema";
 import {
   generateScaffold,
   generateQuestions,
@@ -30,27 +32,25 @@ export async function createSkill(
   const category = String(formData.get("category") ?? "").trim();
   if (!name || !category) return { error: "Add a skill name and category." };
 
-  const db = createAdminClient();
   let skillId: string;
 
   try {
     const scaffold = await generateScaffold(name, category);
 
-    const { data: skill, error: skillError } = await db
-      .from("skills")
-      .insert({
+    const [skill] = await db
+      .insert(skills)
+      .values({
         name,
         normalised_name: scaffold.skill,
         category,
         status: "draft",
         created_by: admin.id,
       })
-      .select("id")
-      .single();
-    if (skillError || !skill) throw new Error(skillError?.message ?? "insert skill");
+      .returning({ id: skills.id });
+    if (!skill) throw new Error("insert skill");
     skillId = skill.id;
 
-    await db.from("skill_levels").insert(
+    await db.insert(skill_levels).values(
       scaffold.levels.map((l) => ({
         skill_id: skillId,
         level: l.level,
@@ -59,7 +59,7 @@ export async function createSkill(
         time_seconds: LEVEL_SECONDS[l.level - 1] ?? 90,
       })),
     );
-    await db.from("skill_bands").insert(
+    await db.insert(skill_bands).values(
       scaffold.bands.map((b) => ({
         skill_id: skillId,
         level: b.level,
@@ -71,14 +71,14 @@ export async function createSkill(
 
     // Generate a question pool per level.
     for (const level of scaffold.levels) {
-      const questions = await generateQuestions(
+      const generated = await generateQuestions(
         scaffold.skill,
         level.name,
         level.focus,
         QUESTIONS_PER_LEVEL,
       );
-      await db.from("questions").insert(
-        questions.map((q) => ({
+      await db.insert(questions).values(
+        generated.map((q) => ({
           skill_id: skillId,
           level: level.level,
           prompt: q.prompt,
@@ -100,28 +100,22 @@ export async function createSkill(
   redirect(`/admin/skills/${skillId}`);
 }
 
+async function setQuestionStatus(questionId: string, status: string) {
+  const admin = await requireAdmin();
+  const [row] = await db
+    .update(questions)
+    .set({ status, reviewed_by: admin.id })
+    .where(eq(questions.id, questionId))
+    .returning({ skill_id: questions.skill_id });
+  if (row) revalidatePath(`/admin/skills/${row.skill_id}`);
+}
+
 export async function approveQuestion(questionId: string): Promise<void> {
-  await requireAdmin();
-  const db = createAdminClient();
-  const { data } = await db
-    .from("questions")
-    .update({ status: "approved" })
-    .eq("id", questionId)
-    .select("skill_id")
-    .single();
-  if (data) revalidatePath(`/admin/skills/${data.skill_id}`);
+  await setQuestionStatus(questionId, "approved");
 }
 
 export async function retireQuestion(questionId: string): Promise<void> {
-  await requireAdmin();
-  const db = createAdminClient();
-  const { data } = await db
-    .from("questions")
-    .update({ status: "retired" })
-    .eq("id", questionId)
-    .select("skill_id")
-    .single();
-  if (data) revalidatePath(`/admin/skills/${data.skill_id}`);
+  await setQuestionStatus(questionId, "retired");
 }
 
 export async function updateBand(
@@ -137,12 +131,10 @@ export async function updateBand(
   if (!bandId || !Number.isFinite(low) || !Number.isFinite(high))
     return { error: "Invalid band values." };
 
-  const db = createAdminClient();
-  const { error } = await db
-    .from("skill_bands")
-    .update({ label, naira_low: Math.round(low), naira_high: Math.round(high) })
-    .eq("id", bandId);
-  if (error) return { error: error.message };
+  await db
+    .update(skill_bands)
+    .set({ label, naira_low: Math.round(low), naira_high: Math.round(high) })
+    .where(eq(skill_bands.id, bandId));
   revalidatePath(`/admin/skills/${skillId}`);
   return {};
 }
@@ -150,16 +142,13 @@ export async function updateBand(
 /** Set a skill live — only if every level has enough approved questions. (§8) */
 export async function setSkillLive(skillId: string): Promise<AdminFormState> {
   await requireAdmin();
-  const db = createAdminClient();
-
-  const { data: questions } = await db
-    .from("questions")
-    .select("level, status")
-    .eq("skill_id", skillId)
-    .eq("status", "approved");
+  const approved = await db
+    .select({ level: questions.level })
+    .from(questions)
+    .where(and(eq(questions.skill_id, skillId), eq(questions.status, "approved")));
 
   const approvedByLevel = new Map<number, number>();
-  for (const q of questions ?? [])
+  for (const q of approved)
     approvedByLevel.set(q.level, (approvedByLevel.get(q.level) ?? 0) + 1);
 
   const thin = [1, 2, 3, 4].filter(
@@ -170,11 +159,7 @@ export async function setSkillLive(skillId: string): Promise<AdminFormState> {
       error: `Each level needs ${MIN_APPROVED_PER_LEVEL}+ approved questions. Short on level(s): ${thin.join(", ")}.`,
     };
 
-  const { error } = await db
-    .from("skills")
-    .update({ status: "live" })
-    .eq("id", skillId);
-  if (error) return { error: error.message };
+  await db.update(skills).set({ status: "live" }).where(eq(skills.id, skillId));
   revalidatePath(`/admin/skills/${skillId}`);
   revalidatePath("/admin");
   return {};

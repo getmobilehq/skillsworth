@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { currentUserWithProfile } from "@/lib/current-user";
 import VerifyForm from "./verify-form";
 
 /** Mask all but the last 4 digits: +2348030000000 → +234 ••• ••0000. */
@@ -9,18 +9,10 @@ function maskPhone(phone: string): string {
 }
 
 export default async function VerifyPage() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/signup");
+  const r = await currentUserWithProfile();
+  if (!r) redirect("/signup");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("phone, phone_verified")
-    .eq("id", user.id)
-    .single();
-
+  const profile = r.profile;
   if (!profile?.phone) redirect("/signup");
   if (profile.phone_verified) redirect("/skills");
 

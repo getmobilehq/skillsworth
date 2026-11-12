@@ -1,7 +1,17 @@
 "use server";
 
-import { createAdminClient } from "@/lib/supabase/admin";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { db } from "@/lib/db";
+import {
+  attempts,
+  attempt_levels,
+  questions,
+  skills,
+  skill_bands,
+  skill_levels,
+} from "@/lib/db/schema";
 import { currentVerifiedUser } from "@/lib/current-user";
+import { isUuid } from "@/lib/ids";
 import {
   isoWeek,
   tierFor,
@@ -53,18 +63,35 @@ export type SubmitResult =
 
 // ───────────────────────────────────────────────────────────── helpers
 
-async function levelTimeSeconds(
-  db: ReturnType<typeof createAdminClient>,
-  skillId: string,
-  level: number,
-): Promise<number> {
-  const { data } = await db
-    .from("skill_levels")
-    .select("time_seconds")
-    .eq("skill_id", skillId)
-    .eq("level", level)
-    .single();
-  return data?.time_seconds ?? 90;
+async function levelTimeSeconds(skillId: string, level: number): Promise<number> {
+  const [row] = await db
+    .select({ time_seconds: skill_levels.time_seconds })
+    .from(skill_levels)
+    .where(and(eq(skill_levels.skill_id, skillId), eq(skill_levels.level, level)))
+    .limit(1);
+  return row?.time_seconds ?? 90;
+}
+
+async function ownedAttempt(attemptId: string, userId: string) {
+  const [a] = await db
+    .select({ user_id: attempts.user_id, status: attempts.status })
+    .from(attempts)
+    .where(eq(attempts.id, attemptId))
+    .limit(1);
+  return a && a.user_id === userId ? a : null;
+}
+
+async function levelRow(attemptId: string, level: number) {
+  const [row] = await db
+    .select({
+      served_question_ids: attempt_levels.served_question_ids,
+      served_at: attempt_levels.served_at,
+      graded_at: attempt_levels.graded_at,
+    })
+    .from(attempt_levels)
+    .where(and(eq(attempt_levels.attempt_id, attemptId), eq(attempt_levels.level, level)))
+    .limit(1);
+  return row ?? null;
 }
 
 // ───────────────────────────────────────────────────────────── begin
@@ -75,26 +102,29 @@ export async function beginAttempt(
 ): Promise<BeginResult> {
   const user = await currentVerifiedUser();
   if (!user) return { ok: false, error: "Please sign in and verify your phone." };
+  if (!isUuid(skillId)) return { ok: false, error: "This skill isn’t available yet." };
 
-  const db = createAdminClient();
-  const { data: skill } = await db
-    .from("skills")
-    .select("status")
-    .eq("id", skillId)
-    .single();
+  const [skill] = await db
+    .select({ status: skills.status })
+    .from(skills)
+    .where(eq(skills.id, skillId))
+    .limit(1);
   if (skill?.status !== "live")
     return { ok: false, error: "This skill isn’t available yet." };
 
   if (mode === "practice") return { ok: true, attemptId: null };
 
   const week = isoWeek(new Date());
-  const { data: existing } = await db
-    .from("attempts")
-    .select("id, status")
-    .eq("user_id", user.id)
-    .eq("skill_id", skillId)
-    .eq("week_iso", week)
-    .maybeSingle();
+  const thisWeek = and(
+    eq(attempts.user_id, user.id),
+    eq(attempts.skill_id, skillId),
+    eq(attempts.week_iso, week),
+  );
+  const [existing] = await db
+    .select({ id: attempts.id, status: attempts.status })
+    .from(attempts)
+    .where(thisWeek)
+    .limit(1);
 
   if (existing?.status === "complete")
     return {
@@ -104,24 +134,28 @@ export async function beginAttempt(
     };
   if (existing) return { ok: true, attemptId: existing.id };
 
-  const { data: created, error } = await db
-    .from("attempts")
-    .insert({ user_id: user.id, skill_id: skillId, week_iso: week, status: "in_progress" })
-    .select("id")
-    .single();
-  if (error || !created) {
-    // Unique-constraint race — refetch.
-    const { data: race } = await db
-      .from("attempts")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("skill_id", skillId)
-      .eq("week_iso", week)
-      .single();
-    if (race) return { ok: true, attemptId: race.id };
-    return { ok: false, error: "Could not start an attempt. Try again." };
-  }
-  return { ok: true, attemptId: created.id };
+  // ON CONFLICT DO NOTHING + refetch: the unique (user, skill, week)
+  // constraint is the real guard; a concurrent double-start just reuses the row.
+  const [created] = await db
+    .insert(attempts)
+    .values({ user_id: user.id, skill_id: skillId, week_iso: week, status: "in_progress" })
+    .onConflictDoNothing()
+    .returning({ id: attempts.id });
+  if (created) return { ok: true, attemptId: created.id };
+
+  const [race] = await db
+    .select({ id: attempts.id, status: attempts.status })
+    .from(attempts)
+    .where(thisWeek)
+    .limit(1);
+  if (race?.status === "complete")
+    return {
+      ok: false,
+      alreadyPlayed: true,
+      error: "You’ve already proven this skill this week. Come back next week!",
+    };
+  if (race) return { ok: true, attemptId: race.id };
+  return { ok: false, error: "Could not start an attempt. Try again." };
 }
 
 // ───────────────────────────────────────────────────────────── serve (no answers)
@@ -135,22 +169,26 @@ export async function serveLevel(args: {
   const { attemptId, skillId, level, mode } = args;
   const user = await currentVerifiedUser();
   if (!user) return { ok: false, error: "Please sign in and verify your phone." };
+  if (!isUuid(skillId) || (attemptId != null && !isUuid(attemptId)))
+    return { ok: false, error: "Not found." };
 
-  const db = createAdminClient();
-  const timeSeconds = await levelTimeSeconds(db, skillId, level);
+  const timeSeconds = await levelTimeSeconds(skillId, level);
 
   // Approved pool for this skill/level — correct_index NOT selected.
-  const { data: pool } = await db
-    .from("questions")
-    .select("id, prompt, options")
-    .eq("skill_id", skillId)
-    .eq("level", level)
-    .eq("status", "approved");
-  if (!pool || pool.length < QUESTIONS_PER_LEVEL_SERVED)
+  const poolRows = await db
+    .select({ id: questions.id, prompt: questions.prompt, options: questions.options })
+    .from(questions)
+    .where(
+      and(
+        eq(questions.skill_id, skillId),
+        eq(questions.level, level),
+        eq(questions.status, "approved"),
+      ),
+    );
+  if (poolRows.length < QUESTIONS_PER_LEVEL_SERVED)
     return { ok: false, error: "This level isn’t ready yet." };
 
-  type PoolRow = { id: string; prompt: string; options: string[] };
-  const poolRows = pool as PoolRow[];
+  type PoolRow = (typeof poolRows)[number];
   const byId = new Map(poolRows.map((q) => [q.id, q]));
 
   // Practice: ephemeral, unscored, no persistence.
@@ -166,30 +204,46 @@ export async function serveLevel(args: {
   }
 
   // Scored: verify ownership.
-  const { data: attempt } = await db
-    .from("attempts")
-    .select("user_id, status")
-    .eq("id", attemptId)
-    .single();
-  if (!attempt || attempt.user_id !== user.id)
+  if (!(await ownedAttempt(attemptId, user.id)))
     return { ok: false, error: "Attempt not found." };
 
   // Idempotent serve: reuse an already-served, ungraded level (anti-cheat —
   // refreshing must not reset the timer or re-roll questions).
-  const { data: existingLevel } = await db
-    .from("attempt_levels")
-    .select("served_question_ids, served_at, graded_at")
-    .eq("attempt_id", attemptId)
-    .eq("level", level)
-    .maybeSingle();
+  const existingLevel = await levelRow(attemptId, level);
+  if (existingLevel) return replay(existingLevel);
 
-  if (existingLevel?.graded_at)
-    return { ok: false, error: "This level is already submitted." };
+  // First serve of this level — pick, record served_at. The unique
+  // (attempt_id, level) constraint makes concurrent first-serves race-safe:
+  // the loser replays the winner's row instead of re-rolling.
+  const picked = shuffle(poolRows).slice(0, QUESTIONS_PER_LEVEL_SERVED);
+  const [inserted] = await db
+    .insert(attempt_levels)
+    .values({
+      attempt_id: attemptId,
+      level,
+      served_question_ids: picked.map((q) => q.id),
+      served_at: new Date().toISOString(),
+    })
+    .onConflictDoNothing()
+    .returning({ id: attempt_levels.id });
+  if (!inserted) {
+    const winner = await levelRow(attemptId, level);
+    if (winner) return replay(winner);
+    return { ok: false, error: "Could not serve this level. Try again." };
+  }
+  return {
+    ok: true,
+    level,
+    questions: picked.map((q) => ({ id: q.id, prompt: q.prompt, options: q.options })),
+    timeSeconds,
+    remainingSeconds: timeSeconds,
+  };
 
-  if (existingLevel?.served_question_ids?.length) {
-    const ids: string[] = existingLevel.served_question_ids;
+  function replay(row: NonNullable<Awaited<ReturnType<typeof levelRow>>>): ServeResult {
+    if (row.graded_at) return { ok: false, error: "This level is already submitted." };
+    const ids = row.served_question_ids ?? [];
     const elapsed = Math.floor(
-      (Date.now() - new Date(existingLevel.served_at).getTime()) / 1000,
+      (Date.now() - new Date(row.served_at ?? Date.now()).getTime()) / 1000,
     );
     return {
       ok: true,
@@ -202,23 +256,6 @@ export async function serveLevel(args: {
       remainingSeconds: Math.max(0, timeSeconds - elapsed),
     };
   }
-
-  // First serve of this level — pick, record served_at.
-  const picked = shuffle(poolRows).slice(0, QUESTIONS_PER_LEVEL_SERVED);
-  const servedIds = picked.map((q) => q.id);
-  await db.from("attempt_levels").insert({
-    attempt_id: attemptId,
-    level,
-    served_question_ids: servedIds,
-    served_at: new Date().toISOString(),
-  });
-  return {
-    ok: true,
-    level,
-    questions: picked.map((q) => ({ id: q.id, prompt: q.prompt, options: q.options })),
-    timeSeconds,
-    remainingSeconds: timeSeconds,
-  };
 }
 
 // ───────────────────────────────────────────────────────────── submit + grade (server-only)
@@ -235,30 +272,21 @@ export async function submitLevel(args: {
   const { attemptId, skillId, level, mode, answers, reprove } = args;
   const user = await currentVerifiedUser();
   if (!user) return { ok: false, error: "Please sign in and verify your phone." };
+  if (!isUuid(skillId) || (attemptId != null && !isUuid(attemptId)))
+    return { ok: false, error: "Not found." };
 
-  const db = createAdminClient();
-  const timeSeconds = await levelTimeSeconds(db, skillId, level);
+  const timeSeconds = await levelTimeSeconds(skillId, level);
 
   let ids: string[];
   let timedOut = false;
   let timeUsed = 0;
 
   if (mode === "scored" && attemptId) {
-    const { data: attempt } = await db
-      .from("attempts")
-      .select("user_id, status")
-      .eq("id", attemptId)
-      .single();
-    if (!attempt || attempt.user_id !== user.id)
+    if (!(await ownedAttempt(attemptId, user.id)))
       return { ok: false, error: "Attempt not found." };
 
-    const { data: row } = await db
-      .from("attempt_levels")
-      .select("served_question_ids, served_at, graded_at")
-      .eq("attempt_id", attemptId)
-      .eq("level", level)
-      .maybeSingle();
-    if (!row?.served_question_ids?.length)
+    const row = await levelRow(attemptId, level);
+    if (!row?.served_question_ids?.length || !row.served_at)
       return { ok: false, error: "This level wasn’t served. Start again." };
     if (row.graded_at)
       return { ok: false, error: "This level is already submitted." };
@@ -270,19 +298,17 @@ export async function submitLevel(args: {
   } else {
     // Practice — grade the client-reported ids, no persistence, no timer.
     ids = args.servedIds;
-    if (!ids?.length) return { ok: false, error: "Nothing to grade." };
+    if (!ids?.length || !ids.every(isUuid))
+      return { ok: false, error: "Nothing to grade." };
   }
 
-  // Authoritative grading via service role.
-  const { data: correctRows } = await db
-    .from("questions")
-    .select("id, correct_index")
-    .in("id", ids);
+  // Authoritative grading — the only player-path read of correct_index.
+  const correctRows = await db
+    .select({ id: questions.id, correct_index: questions.correct_index })
+    .from(questions)
+    .where(inArray(questions.id, ids));
   const correctById = new Map<string, number>(
-    (correctRows ?? []).map((q: { id: string; correct_index: number }) => [
-      q.id,
-      q.correct_index,
-    ]),
+    correctRows.map((q) => [q.id, q.correct_index]),
   );
 
   const perQuestion = ids.map((id, i) => {
@@ -310,29 +336,41 @@ export async function submitLevel(args: {
   }
 
   // Scored: persist this level, recompute aggregate, finalize if terminal.
-  await db
-    .from("attempt_levels")
-    .update({
+  // `graded_at IS NULL` in the WHERE makes grading single-shot: a concurrent
+  // double-submit grades once and the loser is rejected.
+  const gradedNow = await db
+    .update(attempt_levels)
+    .set({
       answers,
       correct_count: correctCount,
       time_used: timeUsed,
       passed,
       graded_at: new Date().toISOString(),
     })
-    .eq("attempt_id", attemptId)
-    .eq("level", level);
+    .where(
+      and(
+        eq(attempt_levels.attempt_id, attemptId),
+        eq(attempt_levels.level, level),
+        isNull(attempt_levels.graded_at),
+      ),
+    )
+    .returning({ id: attempt_levels.id });
+  if (!gradedNow.length)
+    return { ok: false, error: "This level is already submitted." };
 
-  const { data: graded } = await db
-    .from("attempt_levels")
-    .select("level, correct_count, passed")
-    .eq("attempt_id", attemptId)
-    .not("graded_at", "is", null);
-
-  const gradedRows = (graded ?? []) as {
-    level: number;
-    correct_count: number;
-    passed: boolean;
-  }[];
+  const gradedRaw = await db
+    .select({
+      level: attempt_levels.level,
+      correct_count: attempt_levels.correct_count,
+      passed: attempt_levels.passed,
+    })
+    .from(attempt_levels)
+    .where(and(eq(attempt_levels.attempt_id, attemptId), isNotNull(attempt_levels.graded_at)));
+  const gradedRows = gradedRaw.map((r) => ({
+    level: r.level,
+    correct_count: r.correct_count ?? 0,
+    passed: Boolean(r.passed),
+  }));
   const reachedLevel = gradedRows
     .filter((r) => r.passed)
     .reduce((max, r) => Math.max(max, r.level), 0);
@@ -344,20 +382,23 @@ export async function submitLevel(args: {
   let nairaLow: number | null = null;
   let nairaHigh: number | null = null;
   if (reachedLevel >= 1) {
-    const { data: band } = await db
-      .from("skill_bands")
-      .select("label, naira_low, naira_high")
-      .eq("skill_id", skillId)
-      .eq("level", reachedLevel)
-      .single();
+    const [band] = await db
+      .select({
+        label: skill_bands.label,
+        naira_low: skill_bands.naira_low,
+        naira_high: skill_bands.naira_high,
+      })
+      .from(skill_bands)
+      .where(and(eq(skill_bands.skill_id, skillId), eq(skill_bands.level, reachedLevel)))
+      .limit(1);
     bandLabel = band?.label ?? null;
     nairaLow = band?.naira_low ?? null;
     nairaHigh = band?.naira_high ?? null;
   }
 
   await db
-    .from("attempts")
-    .update({
+    .update(attempts)
+    .set({
       reached_level: reachedLevel,
       score,
       tier: terminal ? tier : null,
@@ -365,7 +406,7 @@ export async function submitLevel(args: {
       status: terminal ? "complete" : "in_progress",
       completed_at: terminal ? new Date().toISOString() : null,
     })
-    .eq("id", attemptId);
+    .where(eq(attempts.id, attemptId));
 
   return {
     ok: true,

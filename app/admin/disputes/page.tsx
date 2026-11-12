@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { desc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { attempts, disputes as disputesTable, skills } from "@/lib/db/schema";
 import { Card, Eyebrow } from "@/components/ui";
 import { assignDispute } from "./actions";
 import ResolveForm from "./resolve-form";
@@ -24,15 +26,43 @@ type DisputeRow = {
 
 export default async function DisputesPage() {
   await requireAdmin();
-  const db = createAdminClient();
-  const { data } = await db
-    .from("disputes")
-    .select(
-      "id, type, note, status, assigned_to, resolution, created_at, attempts ( reached_level, band_label, tier, skills ( name ) )",
-    )
-    .order("created_at", { ascending: false });
+  const rows = await db
+    .select({
+      id: disputesTable.id,
+      type: disputesTable.type,
+      note: disputesTable.note,
+      status: disputesTable.status,
+      assigned_to: disputesTable.assigned_to,
+      resolution: disputesTable.resolution,
+      created_at: disputesTable.created_at,
+      reached_level: attempts.reached_level,
+      band_label: attempts.band_label,
+      tier: attempts.tier,
+      skill_name: skills.name,
+    })
+    .from(disputesTable)
+    .leftJoin(attempts, eq(attempts.id, disputesTable.attempt_id))
+    .leftJoin(skills, eq(skills.id, attempts.skill_id))
+    .orderBy(desc(disputesTable.created_at));
 
-  const disputes = (data ?? []) as unknown as DisputeRow[];
+  const disputes: DisputeRow[] = rows.map((r) => ({
+    id: r.id,
+    type: r.type,
+    note: r.note,
+    status: r.status ?? "open",
+    assigned_to: r.assigned_to,
+    resolution: r.resolution,
+    created_at: r.created_at ?? "",
+    attempts:
+      r.reached_level == null
+        ? null
+        : {
+            reached_level: r.reached_level,
+            band_label: r.band_label,
+            tier: r.tier,
+            skills: r.skill_name ? { name: r.skill_name } : null,
+          },
+  }));
   const open = disputes.filter((d) => d.status === "open");
   const resolved = disputes.filter((d) => d.status !== "open");
 

@@ -1,21 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Trophy } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { CATEGORIES } from "@/lib/categories";
+import { loadLeaderboard, type LeaderboardRow as Row } from "./actions";
 
-type Row = {
-  attempt_id: string;
-  user_id: string;
-  display_name: string;
-  skill_name: string;
-  score: number;
-  qualified: boolean;
-};
+// How often the board refreshes while the tab is visible.
+const POLL_MS = 10_000;
 
-// Per-category live leaderboard (handoff §8). Initial query on mount, then
-// re-query whenever Realtime reports a change to leaderboard_entries.
+// Per-category live leaderboard (handoff §8). Loads on mount / category change,
+// then polls every POLL_MS while the tab is visible (replaces Supabase Realtime).
 export default function LeaderboardClient({
   week,
   currentUserId,
@@ -25,39 +19,26 @@ export default function LeaderboardClient({
 }) {
   const [category, setCategory] = useState<string>(CATEGORIES[0]);
   const [rows, setRows] = useState<Row[]>([]);
-  const supabase = createClient();
-
-  const load = useCallback(
-    async (cat: string) => {
-      const { data } = await supabase
-        .from("leaderboard_entries")
-        .select("attempt_id, user_id, display_name, skill_name, score, qualified")
-        .eq("week_iso", week)
-        .eq("category", cat)
-        .order("score", { ascending: false })
-        .limit(50);
-      setRows((data ?? []) as Row[]);
-    },
-    [supabase, week],
-  );
-
   useEffect(() => {
-    load(category);
-  }, [category, load]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("leaderboard")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "leaderboard_entries" },
-        () => load(category),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
+    let cancelled = false;
+    const load = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const next = await loadLeaderboard(week, category);
+        if (!cancelled) setRows(next);
+      } catch {
+        // Transient network blip — the next tick retries.
+      }
     };
-  }, [supabase, category, load]);
+    load();
+    const timer = setInterval(load, POLL_MS);
+    document.addEventListener("visibilitychange", load);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", load);
+    };
+  }, [week, category]);
 
   return (
     <div>

@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { desc } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { safeguarding_reports } from "@/lib/db/schema";
 import { Card, Eyebrow } from "@/components/ui";
 import ReviewForm from "./review-form";
 
@@ -17,13 +19,20 @@ type Report = {
 
 export default async function AdminSafeguardingPage() {
   await requireAdmin();
-  const db = createAdminClient();
-  const { data } = await db
-    .from("safeguarding_reports")
-    .select("id, about, operator, contact, status, note, created_at")
-    .order("created_at", { ascending: false });
-
-  const reports = (data ?? []) as Report[];
+  const reports: Report[] = (
+    await db
+      .select({
+        id: safeguarding_reports.id,
+        about: safeguarding_reports.about,
+        operator: safeguarding_reports.operator,
+        contact: safeguarding_reports.contact,
+        status: safeguarding_reports.status,
+        note: safeguarding_reports.note,
+        created_at: safeguarding_reports.created_at,
+      })
+      .from(safeguarding_reports)
+      .orderBy(desc(safeguarding_reports.created_at))
+  ).map((r) => ({ ...r, created_at: r.created_at ?? "" }));
   const open = reports.filter((r) => r.status === "open");
   const reviewed = reports.filter((r) => r.status !== "open");
 

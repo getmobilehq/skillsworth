@@ -2,7 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Check, X } from "lucide-react";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { asc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { isUuid } from "@/lib/ids";
+import { questions, skill_bands, skill_levels, skills } from "@/lib/db/schema";
 import { Card, Eyebrow } from "@/components/ui";
 import { approveQuestion, retireQuestion } from "@/app/admin/actions";
 import SetLiveButton from "./set-live-button";
@@ -29,25 +32,47 @@ export default async function SkillReview({
   params: { id: string };
 }) {
   await requireAdmin();
-  const db = createAdminClient();
-
-  const { data: skill } = await db
-    .from("skills")
-    .select("id, name, category, status, normalised_name")
-    .eq("id", params.id)
-    .single();
+  // Guard against a malformed id reaching Postgres' uuid cast.
+  if (!isUuid(params.id)) notFound();
+  const skill = await db.query.skills.findFirst({ where: eq(skills.id, params.id) });
   if (!skill) notFound();
 
-  const [{ data: levels }, { data: bands }, { data: questions }] =
-    await Promise.all([
-      db.from("skill_levels").select("level, name, focus").eq("skill_id", skill.id).order("level"),
-      db.from("skill_bands").select("id, level, label, naira_low, naira_high").eq("skill_id", skill.id).order("level"),
-      db.from("questions").select("id, level, prompt, options, correct_index, rationale, status").eq("skill_id", skill.id).order("level"),
-    ]);
+  // Admins see correct_index — they're calibrating (CLAUDE.md).
+  const [levels, bands, qs] = await Promise.all([
+    db
+      .select({ level: skill_levels.level, name: skill_levels.name, focus: skill_levels.focus })
+      .from(skill_levels)
+      .where(eq(skill_levels.skill_id, skill.id))
+      .orderBy(asc(skill_levels.level)),
+    db
+      .select({
+        id: skill_bands.id,
+        level: skill_bands.level,
+        label: skill_bands.label,
+        naira_low: skill_bands.naira_low,
+        naira_high: skill_bands.naira_high,
+      })
+      .from(skill_bands)
+      .where(eq(skill_bands.skill_id, skill.id))
+      .orderBy(asc(skill_bands.level)),
+    db
+      .select({
+        id: questions.id,
+        level: questions.level,
+        prompt: questions.prompt,
+        options: questions.options,
+        correct_index: questions.correct_index,
+        rationale: questions.rationale,
+        status: questions.status,
+      })
+      .from(questions)
+      .where(eq(questions.skill_id, skill.id))
+      .orderBy(asc(questions.level), asc(questions.created_at)),
+  ]);
 
-  const levelList = (levels ?? []) as LevelRow[];
-  const questionList = (questions ?? []) as QuestionRow[];
-  const bandList = (bands ?? []) as BandRow[];
+  const levelList = levels as LevelRow[];
+  const questionList = qs as QuestionRow[];
+  const bandList = bands as BandRow[];
 
   return (
     <div className="flex flex-col gap-7">
