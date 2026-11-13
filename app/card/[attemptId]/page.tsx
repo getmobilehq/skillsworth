@@ -2,10 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Sparkles, Trophy } from "lucide-react";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { leaderboard_entries } from "@/lib/db/schema";
+import { isUuid } from "@/lib/ids";
 
 // Public, shareable score card (handoff §8 — shareable cards drive referrals).
-// Reads display-safe fields from leaderboard_entries via the service role so the
+// Reads display-safe fields from leaderboard_entries on the server so the
 // link works for anyone, signed in or not. No PII beyond the display name.
 type Entry = {
   user_id: string;
@@ -17,13 +20,20 @@ type Entry = {
 };
 
 async function getEntry(attemptId: string): Promise<Entry | null> {
-  const db = createAdminClient();
-  const { data } = await db
-    .from("leaderboard_entries")
-    .select("user_id, display_name, skill_name, score, reached_level, qualified")
-    .eq("attempt_id", attemptId)
-    .maybeSingle();
-  return (data as Entry | null) ?? null;
+  if (!isUuid(attemptId)) return null;
+  const [row] = await db
+    .select({
+      user_id: leaderboard_entries.user_id,
+      display_name: leaderboard_entries.display_name,
+      skill_name: leaderboard_entries.skill_name,
+      score: leaderboard_entries.score,
+      reached_level: leaderboard_entries.reached_level,
+      qualified: leaderboard_entries.qualified,
+    })
+    .from(leaderboard_entries)
+    .where(eq(leaderboard_entries.attempt_id, attemptId))
+    .limit(1);
+  return row ? { ...row, user_id: row.user_id ?? "" } : null;
 }
 
 export async function generateMetadata({

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { desc } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { skills as skillsTable } from "@/lib/db/schema";
 import { Card, Eyebrow } from "@/components/ui";
 import NewSkillForm from "./new-skill-form";
 
@@ -12,11 +14,15 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default async function AdminHome() {
   await requireAdmin();
-  const db = createAdminClient();
-  const { data: skills } = await db
-    .from("skills")
-    .select("id, name, category, status, created_at")
-    .order("created_at", { ascending: false });
+  const skills = await db
+    .select({
+      id: skillsTable.id,
+      name: skillsTable.name,
+      category: skillsTable.category,
+      status: skillsTable.status,
+    })
+    .from(skillsTable)
+    .orderBy(desc(skillsTable.created_at));
 
   return (
     <div className="flex flex-col gap-8">

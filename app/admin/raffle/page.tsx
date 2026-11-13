@@ -1,34 +1,32 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { and, count as countFn, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { leaderboard_entries, raffle_winners } from "@/lib/db/schema";
 import { isoWeek } from "@/lib/play";
 import { Card, Eyebrow } from "@/components/ui";
 import DrawButton from "./draw-button";
 
 export default async function AdminRafflePage() {
   await requireAdmin();
-  const db = createAdminClient();
   const week = isoWeek(new Date());
 
-  const [{ count }, { data: winners }] = await Promise.all([
+  const [[{ count }], rows] = await Promise.all([
     db
-      .from("leaderboard_entries")
-      .select("id", { count: "exact", head: true })
-      .eq("week_iso", week)
-      .eq("qualified", true),
+      .select({ count: countFn() })
+      .from(leaderboard_entries)
+      .where(and(eq(leaderboard_entries.week_iso, week), eq(leaderboard_entries.qualified, true))),
     db
-      .from("raffle_winners")
-      .select("kind, display_name, skill_name, score")
-      .eq("week_iso", week),
+      .select({
+        kind: raffle_winners.kind,
+        display_name: raffle_winners.display_name,
+        skill_name: raffle_winners.skill_name,
+        score: raffle_winners.score,
+      })
+      .from(raffle_winners)
+      .where(eq(raffle_winners.week_iso, week)),
   ]);
-
-  const rows = (winners ?? []) as {
-    kind: string;
-    display_name: string;
-    skill_name: string | null;
-    score: number | null;
-  }[];
 
   return (
     <div className="flex flex-col gap-6">

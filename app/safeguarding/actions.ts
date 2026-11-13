@@ -1,6 +1,7 @@
 "use server";
 
-import { createAdminClient } from "@/lib/supabase/admin";
+import { db } from "@/lib/db";
+import { safeguarding_reports } from "@/lib/db/schema";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 export type ReportState = { error?: string; sent?: boolean };
@@ -20,13 +21,10 @@ export async function submitReport(
   if (about.length < 10)
     return { error: "Please describe what happened so we can help." };
 
-  const db = createAdminClient();
-  const { error } = await db.from("safeguarding_reports").insert({
-    about,
-    operator,
-    contact,
-    status: "open",
-  });
-  if (error) return { error: "Something went wrong. Please try again." };
+  try {
+    await db.insert(safeguarding_reports).values({ about, operator, contact, status: "open" });
+  } catch {
+    return { error: "Something went wrong. Please try again." };
+  }
   return { sent: true };
 }

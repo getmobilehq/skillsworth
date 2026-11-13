@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { count, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { attempts, community_joins, profiles, routings } from "@/lib/db/schema";
 import { tierFor } from "@/lib/play";
 import { Card, Eyebrow } from "@/components/ui";
 import DashboardCharts from "./dashboard-charts";
@@ -10,32 +12,22 @@ import DashboardCharts from "./dashboard-charts";
 // server-side and hands them to the Recharts client.
 export default async function DashboardPage() {
   await requireAdmin();
-  const db = createAdminClient();
-
   const [
-    { count: signups },
-    { count: verified },
-    { data: completed },
-    { data: communityJoins },
-    { data: routings },
+    [{ count: signups }],
+    [{ count: verified }],
+    completedRows,
+    communityJoins,
+    routingRows,
   ] = await Promise.all([
-    db.from("profiles").select("id", { count: "exact", head: true }),
+    db.select({ count: count() }).from(profiles),
+    db.select({ count: count() }).from(profiles).where(eq(profiles.phone_verified, true)),
     db
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .eq("phone_verified", true),
-    db
-      .from("attempts")
-      .select("reached_level, week_iso")
-      .eq("status", "complete"),
-    db.from("community_joins").select("user_id"),
-    db.from("routings").select("tier, destination"),
+      .select({ reached_level: attempts.reached_level, week_iso: attempts.week_iso })
+      .from(attempts)
+      .where(eq(attempts.status, "complete")),
+    db.select({ user_id: community_joins.user_id }).from(community_joins),
+    db.select({ destination: routings.destination }).from(routings),
   ]);
-
-  const completedRows = (completed ?? []) as {
-    reached_level: number;
-    week_iso: string;
-  }[];
 
   // Tier distribution from completed attempts.
   const tiers = { A: 0, B: 0, C: 0 };
@@ -50,12 +42,8 @@ export default async function DashboardPage() {
     .map(([week, plays]) => ({ week, plays }));
 
   const diagnosed = completedRows.length;
-  const communityCount = new Set(
-    (communityJoins ?? []).map((c: { user_id: string }) => c.user_id),
-  ).size;
-  const qtpCount = (routings ?? []).filter(
-    (r: { destination: string }) => r.destination === "qtp",
-  ).length;
+  const communityCount = new Set(communityJoins.map((c) => c.user_id)).size;
+  const qtpCount = routingRows.filter((r) => r.destination === "qtp").length;
 
   // Diagnostic → community conversion (target 70%, §15).
   const conversion = diagnosed ? Math.round((communityCount / diagnosed) * 100) : 0;

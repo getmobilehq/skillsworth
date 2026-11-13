@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { safeguarding_reports } from "@/lib/db/schema";
 
 export type ReviewState = { error?: string };
 
@@ -15,17 +17,15 @@ export async function markReviewed(
   const note = String(formData.get("note") ?? "").trim();
   if (!id) return { error: "Missing report." };
 
-  const db = createAdminClient();
-  const { error } = await db
-    .from("safeguarding_reports")
-    .update({
+  await db
+    .update(safeguarding_reports)
+    .set({
       status: "reviewed",
       note: note || null,
       reviewed_by: admin.id,
       reviewed_at: new Date().toISOString(),
     })
-    .eq("id", id);
-  if (error) return { error: error.message };
+    .where(eq(safeguarding_reports.id, id));
   revalidatePath("/admin/safeguarding");
   return {};
 }

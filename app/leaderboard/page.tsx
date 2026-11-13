@@ -1,16 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { currentUser } from "@/lib/current-user";
 import { isoWeek } from "@/lib/play";
 import { AppShell, Eyebrow, Tagline } from "@/components/ui";
 import LeaderboardClient from "./leaderboard-client";
 
 export default async function LeaderboardPage() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await currentUser();
   if (!user) redirect("/login");
 
   const week = isoWeek(new Date());

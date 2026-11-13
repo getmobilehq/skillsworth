@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { leaderboard_entries, raffle_winners } from "@/lib/db/schema";
 import { isoWeek } from "@/lib/play";
 
 export type DrawState = { error?: string; drawn?: boolean };
@@ -12,22 +14,18 @@ export type DrawState = { error?: string; drawn?: boolean };
 // chosen winners into raffle_winners for the spotlight. Re-running re-draws.
 export async function runDraw(): Promise<DrawState> {
   await requireAdmin();
-  const db = createAdminClient();
   const week = isoWeek(new Date());
   const slug = `skill-worth-${week}`;
 
-  const { data: pool } = await db
-    .from("leaderboard_entries")
-    .select("display_name, skill_name, score")
-    .eq("week_iso", week)
-    .eq("qualified", true)
-    .order("score", { ascending: false });
-
-  const entries = (pool ?? []) as {
-    display_name: string;
-    skill_name: string;
-    score: number;
-  }[];
+  const entries = await db
+    .select({
+      display_name: leaderboard_entries.display_name,
+      skill_name: leaderboard_entries.skill_name,
+      score: leaderboard_entries.score,
+    })
+    .from(leaderboard_entries)
+    .where(and(eq(leaderboard_entries.week_iso, week), eq(leaderboard_entries.qualified, true)))
+    .orderBy(desc(leaderboard_entries.score));
   if (!entries.length) return { error: "No qualified entries yet this week." };
 
   const top = entries[0];
@@ -36,8 +34,8 @@ export async function runDraw(): Promise<DrawState> {
     ? rest[Math.floor(Math.random() * rest.length)]
     : top;
 
-  await db.from("raffle_winners").delete().eq("week_iso", week);
-  await db.from("raffle_winners").insert([
+  await db.delete(raffle_winners).where(eq(raffle_winners.week_iso, week));
+  await db.insert(raffle_winners).values([
     {
       week_iso: week,
       raffle_slug: slug,

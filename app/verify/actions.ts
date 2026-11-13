@@ -1,7 +1,11 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { profiles } from "@/lib/db/schema";
+import { currentUserWithProfile } from "@/lib/current-user";
+import { checkPhoneOtp, sendPhoneOtp } from "@/lib/otp";
 import { rateLimit } from "@/lib/rate-limit";
 
 export type VerifyState = { error?: string };
@@ -16,53 +20,34 @@ export async function verifyOtp(
   const token = String(formData.get("token") ?? "").replace(/\D/g, "");
   if (token.length < 6) return { error: "Enter the 6-digit code." };
 
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/signup");
+  const r = await currentUserWithProfile();
+  if (!r) redirect("/signup");
+  const phone = r.profile?.phone;
+  if (!phone) return { error: "No pending phone found. Please sign up again." };
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("phone")
-    .eq("id", user.id)
-    .single();
-  if (!profile?.phone)
-    return { error: "No pending phone found. Please sign up again." };
+  // Throttle guesses per user (best-effort; see lib/rate-limit caveat).
+  if (!rateLimit(`otp-check:${r.user.id}`, 5, 60_000))
+    return { error: "Too many tries. Wait a minute and try again." };
 
-  const { error } = await supabase.auth.verifyOtp({
-    phone: profile.phone,
-    token,
-    type: "phone_change",
-  });
-  if (error) return { error: "That code doesn’t match. Try again." };
+  const ok = await checkPhoneOtp(phone, token);
+  if (!ok) return { error: "That code doesn’t match. Try again." };
 
-  const { error: updateError } = await supabase
-    .from("profiles")
-    .update({ phone_verified: true })
-    .eq("id", user.id);
-  if (updateError) return { error: updateError.message };
+  await db
+    .update(profiles)
+    .set({ phone_verified: true })
+    .where(eq(profiles.id, r.user.id));
 
   redirect("/skills");
 }
 
 // Resends the OTP to the profile's pending phone. Plain form action (void).
 export async function resendOtp(): Promise<void> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/signup");
+  const r = await currentUserWithProfile();
+  if (!r) redirect("/signup");
 
   // Throttle resends per user (best-effort; see lib/rate-limit caveat).
-  if (!rateLimit(`otp-resend:${user.id}`, 3, 60_000)) return;
+  if (!rateLimit(`otp-resend:${r.user.id}`, 3, 60_000)) return;
+  if (!r.profile?.phone) return;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("phone")
-    .eq("id", user.id)
-    .single();
-  if (!profile?.phone) return;
-
-  await supabase.auth.updateUser({ phone: profile.phone });
+  await sendPhoneOtp(r.profile.phone);
 }

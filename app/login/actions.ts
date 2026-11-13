@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
 
 export type LoginState = { error?: string };
 
@@ -17,15 +18,20 @@ export async function login(
   if (!email || password.length < 6)
     return { error: "Enter your email and password." };
 
-  const supabase = createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) return { error: "Email or password is incorrect." };
+  try {
+    await auth.api.signInEmail({ body: { email, password }, headers: headers() });
+  } catch {
+    return { error: "Email or password is incorrect." };
+  }
 
   redirect("/skills");
 }
 
 export async function signOut(): Promise<void> {
-  const supabase = createClient();
-  await supabase.auth.signOut();
+  try {
+    await auth.api.signOut({ headers: headers() });
+  } catch {
+    // Already signed out — fine.
+  }
   redirect("/");
 }

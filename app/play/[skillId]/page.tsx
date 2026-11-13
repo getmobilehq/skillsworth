@@ -1,5 +1,9 @@
 import { redirect, notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { asc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { skill_levels, skills } from "@/lib/db/schema";
+import { currentUserWithProfile } from "@/lib/current-user";
+import { isUuid } from "@/lib/ids";
 import PlayClient, { type LevelMeta } from "./play-client";
 
 // Play entry (handoff §8). Guards auth + phone-verified, loads the live skill
@@ -12,36 +16,29 @@ export default async function PlayPage({
   params: { skillId: string };
   searchParams: { mode?: string; attempt?: string; level?: string };
 }) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const r = await currentUserWithProfile();
+  if (!r) redirect("/login");
+  if (!r.profile?.phone_verified) redirect("/verify");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("phone_verified")
-    .eq("id", user.id)
-    .single();
-  if (!profile?.phone_verified) redirect("/verify");
-
-  const { data: skill } = await supabase
-    .from("skills")
-    .select("id, name, status")
-    .eq("id", params.skillId)
-    .single();
+  if (!isUuid(params.skillId)) notFound();
+  const skill = await db.query.skills.findFirst({ where: eq(skills.id, params.skillId) });
   if (!skill || skill.status !== "live") notFound();
 
-  const { data: levels } = await supabase
-    .from("skill_levels")
-    .select("level, name, focus, time_seconds")
-    .eq("skill_id", skill.id)
-    .order("level");
+  const levels = await db
+    .select({
+      level: skill_levels.level,
+      name: skill_levels.name,
+      focus: skill_levels.focus,
+      time_seconds: skill_levels.time_seconds,
+    })
+    .from(skill_levels)
+    .where(eq(skill_levels.skill_id, skill.id))
+    .orderBy(asc(skill_levels.level));
 
   const mode = searchParams.mode === "practice" ? "practice" : "scored";
 
   // Re-prove resume: ?attempt=<id>&level=<n> drops straight into one level (§5).
-  const resumeAttemptId = searchParams.attempt ?? null;
+  const resumeAttemptId = isUuid(searchParams.attempt) ? searchParams.attempt : null;
   const reproveLevel = searchParams.level ? Number(searchParams.level) : null;
 
   return (
